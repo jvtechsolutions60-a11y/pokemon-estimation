@@ -112,3 +112,32 @@ test('ajout à la collection : prix, nom anglais gardé après rechargement', ()
   assert.equal(items[0].nameEn, 'Garchomp C LV.X');
   assert.equal(items[0].number, '145/147');
 }));
+
+test('images officielles : passage par notre serveur quand le CORS de TCGdex est refusé', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const png = await readFile(new URL('../icons/icon-192.png', import.meta.url));
+  const api = tcgdex();
+  const hosts = [];
+  const { browser, page, errors } = await openSite(site, async (route) => {
+    const url = new URL(route.request().url());
+    hosts.push(url.host + url.pathname);
+    // What assets.tcgdex.net really sends: the header twice, which browsers reject.
+    if (url.host === 'assets.tcgdex.net') return route.fulfill({ body: png, contentType: 'image/png', headers: { 'access-control-allow-origin': '*, *' } });
+    if (url.host.endsWith('.workers.dev')) return route.fulfill({ body: png, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' } });
+    return api.handler(route);
+  });
+  try {
+    const size = await page.evaluate(async () => {
+      const img = await loadRemoteImage('https://assets.tcgdex.net/fr/pl/pl3/145/low.webp');
+      const c = document.createElement('canvas');
+      c.getContext('2d').drawImage(img, 0, 0);
+      c.getContext('2d').getImageData(0, 0, 1, 1); // throws on a tainted canvas
+      return img.naturalWidth;
+    });
+    assert.equal(size, 192);
+    assert.ok(hosts.includes('pokemon-estimation-sync.jvtechsolutions60.workers.dev/img/fr/pl/pl3/145/low.webp'), hosts.join('\n'));
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});

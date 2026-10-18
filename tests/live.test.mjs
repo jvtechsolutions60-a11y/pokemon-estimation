@@ -32,12 +32,12 @@ async function probe(url) {
   return `${url} → HTTP ${res.status}, type ${res.headers.get('content-type')}, CORS ${res.headers.get('access-control-allow-origin')}`;
 }
 
-test('images officielles lisibles (comparaison visuelle des éditions)', async () => {
+test('images officielles lisibles par la page (comparaison visuelle des éditions)', async () => {
   const image = await ctx.page.evaluate(async () => (await getCard('fr', 'pl3-145')).image);
   const info = await probe(`${image}/low.webp`);
   const result = await ctx.page.evaluate(async (url) => {
     try {
-      const img = await loadRemoteImage(url);
+      const img = await loadRemoteImage(url); // direct, or through our server
       const c = document.createElement('canvas');
       c.width = 10; c.height = 10;
       c.getContext('2d').drawImage(img, 0, 0, 10, 10);

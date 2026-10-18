@@ -11,11 +11,26 @@ const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const MAX_DATA_CHARS = 700_000;
 const MAX_CREATIONS_PER_DAY = 1000;
 const RETENTION_DAYS = 730;
+// Official card images, e.g. fr/pl/pl3/145/low.webp. assets.tcgdex.net sends its
+// CORS header twice ("*, *"), which browsers reject, so the page cannot read the
+// pixels it needs to tell two editions apart: we pass them through with one header.
+const IMAGE_RE = /^\/img\/((?:[a-z]{2}(?:-[a-z]{2})?)\/[\w-]+\/[\w.-]+\/[\w.-]+\/(?:low|high)\.(?:webp|png|jpg))$/;
+const IMAGE_TTL = 30 * 86_400;
 
 export default {
   async fetch(request, env) {
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+    // Public images: any page may read them, with their own, larger limit.
+    const image = new URL(request.url).pathname.match(IMAGE_RE);
+    if (image) {
+      const open = { 'Access-Control-Allow-Origin': '*' };
+      if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, open);
+      const key = await sha256Hex(`pokemon-estimation:${request.headers.get('CF-Connecting-IP') || ''}`);
+      if (!(await allowed(env.IMAGE_LIMITER, key))) return json({ error: 'rate_limited' }, 429, open);
+      return proxyImage(image[1], open);
+    }
 
     // Abuse limits, keyed on a hash of the client address that only lives in
     // Cloudflare's in-memory counters; nothing about the client is stored.
@@ -102,6 +117,15 @@ export default {
     ]);
   },
 };
+
+async function proxyImage(path, cors) {
+  const res = await fetch(`https://assets.tcgdex.net/${path}`, { cf: { cacheEverything: true, cacheTtl: IMAGE_TTL } });
+  const type = res.headers.get('Content-Type') || '';
+  if (!res.ok || !type.startsWith('image/')) return json({ error: 'not_found' }, 404, cors);
+  return new Response(res.body, {
+    headers: { ...cors, 'Content-Type': type, 'Cache-Control': `public, max-age=${IMAGE_TTL}`, 'X-Content-Type-Options': 'nosniff' },
+  });
+}
 
 function today() {
   return new Date().toISOString().slice(0, 10);

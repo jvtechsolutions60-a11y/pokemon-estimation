@@ -424,14 +424,29 @@ const REF_H = 70;
 const CMP_W = 100;
 const CMP_H = 140;
 
-function loadRemoteImage(url) {
+function loadCorsImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous'; // needed to read the pixels back
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onerror = () => reject(new Error(`Image illisible : ${url}`));
     img.src = url;
   });
+}
+
+// assets.tcgdex.net answers with a doubled CORS header ("*, *") that browsers
+// reject, so its pixels can't be read directly: go through our server, which
+// passes the image on with a clean header. The direct load is tried first in
+// case TCGdex fixes it.
+async function loadRemoteImage(url) {
+  try {
+    return await loadCorsImage(url);
+  } catch (e) {
+    const api = typeof Sync !== 'undefined' && Sync.apiUrl();
+    const path = url.startsWith('https://assets.tcgdex.net/') && url.slice('https://assets.tcgdex.net/'.length);
+    if (!api || !path) throw e;
+    return loadCorsImage(`${api}/img/${path}`);
+  }
 }
 
 // RGB values of a region of `source`, resized to w×h.

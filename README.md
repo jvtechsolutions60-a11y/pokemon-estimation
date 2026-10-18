@@ -26,6 +26,7 @@ Pas de nom, d'email, de mot de passe ni d'adresse : un compte est un **code secr
 - Contrepartie : un code perdu = une collection perdue, personne ne peut la déchiffrer.
 - Anti-abus : 5 créations de compte par minute et 120 requêtes par minute par connexion (compteurs en mémoire chez Cloudflare), 1 000 comptes créés par jour au maximum.
 - Conservation : un compte inutilisé pendant 2 ans est effacé chaque nuit (seul le jour de dernière utilisation est noté).
+- Le même serveur relaie les images officielles (`/img/…`) pour la comparaison des éditions : `assets.tcgdex.net` envoie son en-tête CORS en double (`*, *`), que les navigateurs refusent (600 images par minute et par connexion au maximum).
 
 Détails pour les visiteurs : [confidentialite.html](confidentialite.html).
 
@@ -36,6 +37,16 @@ Détails pour les visiteurs : [confidentialite.html](confidentialite.html).
 3. Dans GitHub : *Settings → Secrets and variables → Actions*, ajouter `CLOUDFLARE_API_TOKEN` (le jeton) et `CLOUDFLARE_ACCOUNT_ID` (visible sur le tableau de bord Cloudflare).
 4. Lancer le workflow *Déployer le serveur de synchronisation* (onglet *Actions*). Il crée la base, applique le schéma et déploie le Worker.
 5. Renseigner l'adresse du Worker dans `API_URL` de [`sync.js`](sync.js) (actuellement `https://pokemon-estimation-sync.jvtechsolutions60.workers.dev`).
+
+## Tests
+
+```sh
+cd tests && npm install && npx playwright install chromium
+npm test          # site complet avec des données simulées
+npm run test:live # vrais services : TCGdex, images officielles, lecture du numéro
+```
+
+GitHub Actions lance les deux à chaque envoi sur `main` et chaque lundi, pour repérer un changement de TCGdex avant les utilisateurs.
 
 ## Lancer en local
 

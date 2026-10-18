@@ -29,3 +29,9 @@ simple = { limit = 5, period = 60 }
 name = "REQUEST_LIMITER"
 namespace_id = "1002"
 simple = { limit = 120, period = 60 }
+
+# Card images passed through for the edition comparison (up to 8 per photo).
+[[ratelimits]]
+name = "IMAGE_LIMITER"
+namespace_id = "1003"
+simple = { limit = 600, period = 60 }

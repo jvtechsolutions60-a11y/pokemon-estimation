@@ -157,6 +157,7 @@ const Sync = (() => {
 
   return {
     enabled: () => Boolean(API_URL),
+    apiUrl: () => API_URL,
     connected: () => Boolean(session),
     code: () => (session ? session.code : null),
     generateCode,
