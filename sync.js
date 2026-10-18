@@ -10,7 +10,7 @@
 const Sync = (() => {
   // Worker address, set once it is deployed (see README). Empty = accounts disabled.
   // window.POKEMON_SYNC_URL overrides it for local testing.
-  const API_URL = window.POKEMON_SYNC_URL || '';
+  const API_URL = window.POKEMON_SYNC_URL || 'https://pokemon-estimation-sync.jvtechsolutions60.workers.dev';
 
   const CODE_KEY = 'pokemon-estimation:code';
   const VERSION_KEY = 'pokemon-estimation:version';

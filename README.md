@@ -25,7 +25,7 @@ Pas de nom, d'email, de mot de passe ni d'adresse : un compte est un **code secr
 2. Créer un jeton d'API (*My Profile → API Tokens → Create Token → Edit Cloudflare Workers*, en ajoutant la permission *Account → D1 → Edit*).
 3. Dans GitHub : *Settings → Secrets and variables → Actions*, ajouter `CLOUDFLARE_API_TOKEN` (le jeton) et `CLOUDFLARE_ACCOUNT_ID` (visible sur le tableau de bord Cloudflare).
 4. Lancer le workflow *Déployer le serveur de synchronisation* (onglet *Actions*). Il crée la base, applique le schéma et déploie le Worker.
-5. Renseigner l'adresse du Worker dans `API_URL` de [`sync.js`](sync.js).
+5. Renseigner l'adresse du Worker dans `API_URL` de [`sync.js`](sync.js) (actuellement `https://pokemon-estimation-sync.jvtechsolutions60.workers.dev`).
 
 ## Lancer en local
 
