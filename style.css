@@ -101,3 +101,11 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .cm-form h3 { margin: 0 0 6px; }
 .cm-form ol { padding-left: 20px; }
 .cm-form textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.set-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+label.tick { display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); cursor: pointer; }
+label.tick img, label.tick .noimg { width: 100%; aspect-ratio: 245 / 337; object-fit: contain; border-radius: 6px; opacity: .45; background: var(--panel); }
+label.tick.owned { border-color: var(--accent); }
+label.tick.owned img { opacity: 1; }
+.tick-row { display: flex; align-items: center; gap: 6px; font-size: .85rem; font-weight: 600; }
+.tick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tick-cond { font-size: .8rem; padding: 4px; }

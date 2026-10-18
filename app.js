@@ -575,9 +575,120 @@ $('manual').addEventListener('submit', (ev) => {
   else setStatus('Indique un numéro et un total, ou un nom.');
 });
 
+// ---------- UI: browse a set ----------
+//
+// Tick the cards you own in a set instead of photographing them one by one.
+// A ticked card is added in Near Mint; its condition can be changed per card.
+
+let browseCards = [];
+let browseSetName = '';
+let browseOfficial = 0;
+
+function ownedItem(id) {
+  return collection.find((i) => i.id === id && i.lang === lang());
+}
+
+async function loadSetList() {
+  try {
+    const sets = await getSets(lang());
+    const select = $('setSelect');
+    select.innerHTML = '';
+    select.appendChild(new Option('Choisis une extension', ''));
+    // Newest first: the API lists sets in release order.
+    for (const s of [...sets].reverse()) {
+      const count = s.cardCount ? ` (${s.cardCount.official})` : '';
+      select.appendChild(new Option(`${s.name}${count}`, s.id));
+    }
+  } catch (e) {
+    $('setSelect').innerHTML = '<option value="">Extensions indisponibles</option>';
+    $('setInfo').textContent = `Erreur : ${e.message}`;
+  }
+}
+
+async function openSet(id) {
+  browseCards = [];
+  $('setGrid').innerHTML = '';
+  if (!id) { $('setInfo').textContent = ''; return; }
+  $('setInfo').textContent = 'Chargement…';
+  try {
+    const set = await getJSON(`${API}/${lang()}/sets/${encodeURIComponent(id)}`);
+    browseCards = set.cards || [];
+    browseSetName = set.name;
+    browseOfficial = set.cardCount ? set.cardCount.official : 0;
+    renderBrowse();
+  } catch (e) {
+    $('setInfo').textContent = `Erreur : ${e.message}`;
+  }
+}
+
+function renderBrowse() {
+  const grid = $('setGrid');
+  grid.innerHTML = '';
+  if (!browseCards.length) return;
+  const q = fold($('setFilter').value.trim());
+  const ownedOnly = $('setOwnedOnly').checked;
+  const owned = browseCards.filter((c) => ownedItem(c.id)).length;
+  $('setInfo').textContent = `${browseSetName} : ${owned} / ${browseCards.length} cartes cochées.`;
+
+  for (const c of browseCards) {
+    const item = ownedItem(c.id);
+    if (ownedOnly && !item) continue;
+    if (q && !fold(c.name).includes(q) && !String(c.localId).includes(q)) continue;
+
+    const el = document.createElement('label');
+    el.className = `tick${item ? ' owned' : ''}`;
+    el.innerHTML = `
+      ${c.image ? `<img loading="lazy" src="${c.image}/low.webp" alt="">` : '<div class="noimg"></div>'}
+      <span class="tick-row"><input type="checkbox"> <span class="tick-name"></span></span>
+      <span class="muted small tick-num"></span>
+      <select class="tick-cond"></select>`;
+    el.querySelector('.tick-name').textContent = c.name;
+    el.querySelector('.tick-num').textContent = browseOfficial ? `${c.localId}/${browseOfficial}` : c.localId;
+
+    const box = el.querySelector('input');
+    const cond = el.querySelector('.tick-cond');
+    for (const [k, v] of Object.entries(CONDITIONS)) cond.appendChild(new Option(`${k} · ${v.label}`, k));
+    box.checked = Boolean(item);
+    cond.value = item ? item.condition : 'NM';
+    cond.disabled = !item;
+
+    box.addEventListener('change', async () => {
+      if (box.checked) {
+        box.disabled = true;
+        try {
+          const full = await getCard(lang(), c.id);
+          addToCollection(full, defaultVariant(full), cond.value);
+        } catch (e) {
+          box.checked = false;
+          $('setInfo').textContent = `Impossible d'ajouter ${c.name} : ${e.message}`;
+        }
+        box.disabled = false;
+      } else {
+        collection = collection.filter((i) => !(i.id === c.id && i.lang === lang()));
+        saveCollection();
+        renderCollection();
+      }
+    });
+    cond.addEventListener('change', () => {
+      for (const i of collection) if (i.id === c.id && i.lang === lang()) i.condition = cond.value;
+      saveCollection();
+      renderCollection();
+    });
+    grid.appendChild(el);
+  }
+}
+
+$('setSelect').addEventListener('change', (e) => openSet(e.target.value));
+$('setFilter').addEventListener('input', renderBrowse);
+$('setOwnedOnly').addEventListener('change', renderBrowse);
+$('lang').addEventListener('change', () => {
+  loadSetList();
+  openSet('');
+});
+
 // ---------- UI: collection ----------
 
-function addToCollection(card, variant) {
+function addToCollection(card, variant, condition = 'NM') {
   const existing = collection.find((i) => i.id === card.id && i.variant === variant && i.lang === lang());
   if (existing) {
     existing.qty += 1;
@@ -590,7 +701,7 @@ function addToCollection(card, variant) {
       number: displayNumber(card),
       image: card.image ? `${card.image}/low.webp` : '',
       variant,
-      condition: 'NM',
+      condition,
       qty: 1,
       marketPrice: marketPrice(card, variant),
       priceDate: card.pricing && card.pricing.cardmarket ? card.pricing.cardmarket.updated : null,
@@ -670,6 +781,7 @@ function renderCollection() {
     tbody.appendChild(tr);
   });
 
+  if (browseCards.length) renderBrowse();
   $('grandTotal').textContent = euro.format(total);
   $('count').textContent = count ? `(${count} carte${count > 1 ? 's' : ''})` : '';
 }
@@ -928,4 +1040,5 @@ $('accDelete').addEventListener('click', async () => {
 });
 
 renderCollection();
+loadSetList();
 Sync.resume();
