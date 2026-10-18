@@ -40,14 +40,28 @@ const sample = await page.evaluate(async ({ count, seed }) => {
 
 console.log(`${sample.length} cartes tirées`);
 
+// The official image, fetched from here: assets.tcgdex.net's doubled CORS
+// header stops the page from downloading it itself.
+const images = new Map();
+async function officialImage(card) {
+  if (!images.has(card.id)) {
+    const base = await page.evaluate(async (id) => (await getCard('fr', id)).image || null, card.id);
+    if (!base) return null;
+    const res = await fetch(`${base}/high.png`);
+    if (!res.ok) return null;
+    images.set(card.id, Buffer.from(await res.arrayBuffer()).toString('base64'));
+  }
+  return images.get(card.id);
+}
+
 async function runOne(card, mode, seed) {
-  return page.evaluate(async ({ card, mode, seed }) => {
+  const png = await officialImage(card);
+  if (!png) return { skipped: 'pas d\u2019image' };
+  return page.evaluate(async ({ card, mode, seed, png }) => {
     let s = seed >>> 0;
     const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-    const full = await getCard('fr', card.id);
-    if (!full.image) return { skipped: 'pas d’image' };
-    const blob = await (await fetch(`${full.image}/high.png`)).blob();
-    let file = new File([blob], 'carte.png', { type: blob.type });
+    const bytes = Uint8Array.from(atob(png), (ch) => ch.charCodeAt(0));
+    let file = new File([bytes], 'carte.png', { type: 'image/png' });
     if (mode === 'photo') {
       // Card lying on a table, shot slightly tilted, under uneven light.
       const src = await loadImage(file);
@@ -97,7 +111,6 @@ async function runOne(card, mode, seed) {
 }
 
 const rows = [];
-images.clear();
 for (const [i, card] of sample.entries()) {
   for (const mode of ['scan', 'photo']) {
     let r;
