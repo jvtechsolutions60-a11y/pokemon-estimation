@@ -38,9 +38,10 @@
         <li>Ton compte est un code secret aléatoire créé sur ton appareil. Nous ne savons pas à qui il appartient.</li>
         <li>Ta collection est chiffrée sur ton appareil (AES-256) avant d'être envoyée. Le serveur ne stocke qu'un identifiant
           aléatoire, une empreinte du jeton d'accès et ce bloc chiffré : il ne peut pas lire ta collection.</li>
-        <li>Le serveur ne tient pas de journal des connexions et ne conserve pas d'adresse IP.</li>
-        <li>« Supprimer mon compte » efface définitivement tes données du serveur. Sans action de ta part, elles sont gardées
-          tant que le compte existe.</li>
+        <li>Le serveur ne tient pas de journal des connexions et ne conserve pas d'adresse IP. Pour bloquer les abus,
+          il compte les demandes de chaque connexion pendant une minute, à partir d'une empreinte de l'adresse gardée seulement en mémoire.</li>
+        <li>« Supprimer mon compte » efface immédiatement et définitivement tes données du serveur.
+          Un compte qui n'est pas ouvert pendant 2 ans est effacé automatiquement. Seul le jour de dernière utilisation est noté, pas l'heure.</li>
         <li>Si tu perds ton code, personne ne peut récupérer ta collection, pas même nous.</li>
       </ul>
 
@@ -59,13 +60,16 @@
       <h2>Tes droits</h2>
       <p>Tu peux à tout moment exporter ta collection (bouton « Exporter CSV »), la modifier, la vider ou supprimer ton compte, directement dans le site.
         Comme nous ne pouvons pas relier un compte à une personne, ces boutons sont le moyen le plus sûr d'exercer tes droits (RGPD).
-        Pour toute question : <span class="todo">[adresse email de contact à compléter]</span>.
+        Pour toute question, ouvre un ticket sur <a href="https://github.com/jvtechsolutions60-a11y/pokemon-estimation/issues" rel="noopener">la page GitHub du projet</a>
+        (il est public : n'y écris jamais ton code secret).
         Tu peux aussi saisir la <a href="https://www.cnil.fr/fr/plaintes" rel="noopener">CNIL</a>.</p>
 
       <h1 id="mentions">Mentions légales</h1>
       <h2>Éditeur</h2>
       <p>JVTECH Solutions<br>
-        <span class="todo">[forme juridique, adresse, SIREN, directeur de la publication, email à compléter]</span></p>
+        <span class="todo">[forme juridique, adresse du siège, SIREN, email à compléter]</span><br>
+        Contact : <a href="https://github.com/jvtechsolutions60-a11y/pokemon-estimation/issues" rel="noopener">GitHub du projet</a><br>
+        Code source : <a href="https://github.com/jvtechsolutions60-a11y/pokemon-estimation" rel="noopener">github.com/jvtechsolutions60-a11y/pokemon-estimation</a></p>
       <h2>Hébergement</h2>
       <p>Site : GitHub, Inc., 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, États-Unis.<br>
         Serveur des comptes : Cloudflare, Inc., 101 Townsend Street, San Francisco, CA 94107, États-Unis.</p>

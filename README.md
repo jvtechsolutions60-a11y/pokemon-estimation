@@ -18,6 +18,10 @@ Pas de nom, d'email, de mot de passe ni d'adresse : un compte est un **code secr
 - Le serveur ([`worker/`](worker/)) est un Cloudflare Worker + base D1, sans journal de requêtes (pas d'adresse IP conservée).
 - Une fuite de la base ne révèle donc ni qui sont les utilisateurs, ni ce qu'ils possèdent.
 - Contrepartie : un code perdu = une collection perdue, personne ne peut la déchiffrer.
+- Anti-abus : 5 créations de compte par minute et 120 requêtes par minute par connexion (compteurs en mémoire chez Cloudflare), 1 000 comptes créés par jour au maximum.
+- Conservation : un compte inutilisé pendant 2 ans est effacé chaque nuit (seul le jour de dernière utilisation est noté).
+
+Détails pour les visiteurs : [confidentialite.html](confidentialite.html).
 
 ### Activer les comptes (une seule fois)
 

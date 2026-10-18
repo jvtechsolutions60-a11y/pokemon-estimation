@@ -101,6 +101,7 @@ const Sync = (() => {
       body: body ? JSON.stringify(body) : undefined,
     });
     const payload = await res.json().catch(() => ({}));
+    if (res.status === 429) throw new Error('Trop de demandes pour le moment. Réessaie dans quelques minutes.');
     return { status: res.status, payload };
   }
 

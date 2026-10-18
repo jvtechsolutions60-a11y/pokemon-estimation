@@ -14,3 +14,18 @@ ALLOWED_ORIGINS = "https://jvtechsolutions60-a11y.github.io,http://localhost:808
 binding = "DB"
 database_name = "pokemon-estimation"
 database_id = "__D1_DATABASE_ID__"
+
+# Erase vaults unused for 2 years, every night.
+[triggers]
+crons = ["17 3 * * *"]
+
+# Per-client request limits, counted in memory by Cloudflare (nothing stored).
+[[ratelimits]]
+name = "CREATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "REQUEST_LIMITER"
+namespace_id = "1002"
+simple = { limit = 120, period = 60 }
