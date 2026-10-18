@@ -4,6 +4,11 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { startSite, openSite } from './helpers.mjs';
 
+// Any crash shows up as an annotation on the run page.
+const report = (e) => { console.log(`::error title=Banc d'essai::${String(e && e.stack || e).replace(/\n/g, '%0A')}`); process.exit(1); };
+process.on('uncaughtException', report);
+process.on('unhandledRejection', report);
+
 const COUNT = Number(process.argv[2] || 100);
 const SEED = Number(process.argv[3] || 1);
 const OUT = new URL('./bench-results/', import.meta.url);
