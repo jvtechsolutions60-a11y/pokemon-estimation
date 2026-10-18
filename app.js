@@ -98,10 +98,29 @@ function saveCollection({ fromServer = false } = {}) {
 
 // ---------- API ----------
 
+// TCGdex sometimes drops a request or answers 5xx/429 for a moment: retry a
+// couple of times, and never wait forever on a stalled connection.
+const FETCH_TIMEOUT_MS = 15000;
+const FETCH_RETRIES = 2;
+
 async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} sur ${url}`);
-  return res.json();
+  let lastError = null;
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt += 1) {
+    if (attempt) await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (res.ok) return await res.json();
+      lastError = new Error(`HTTP ${res.status} sur ${url}`);
+      if (res.status !== 429 && res.status < 500) break; // 404 & co: retrying won't help
+    } catch (e) {
+      lastError = e.name === 'AbortError' ? new Error(`Pas de réponse de ${new URL(url).host}`) : e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
 }
 
 async function getSets(lang) {
@@ -128,12 +147,14 @@ async function findByNumber(lang, num, total) {
   if (!candidates.length) candidates = sets.filter((s) => s.cardCount && s.cardCount.total === total);
   candidates = candidates.slice(-MAX_CANDIDATE_SETS).reverse();
 
+  let failed = 0;
   const found = await Promise.all(candidates.map(async (set) => {
     try {
       const full = await getJSON(`${API}/${lang}/sets/${encodeURIComponent(set.id)}`);
       const brief = (full.cards || []).find((c) => parseInt(c.localId, 10) === num);
-      return brief ? getCard(lang, brief.id) : null;
+      return brief ? await getCard(lang, brief.id) : null;
     } catch {
+      failed += 1;
       return null;
     }
   }));
@@ -148,10 +169,11 @@ async function findByNumber(lang, num, total) {
     reprints = (await Promise.all(classicSets.map(async (set) => {
       try {
         const full = await getJSON(`${API}/${lang}/sets/${encodeURIComponent(set.id)}`);
-        return Promise.all((full.cards || [])
+        return await Promise.all((full.cards || [])
           .filter((c) => names.has(c.name))
-          .map((c) => getCard(lang, c.id).catch(() => null)));
+          .map((c) => getCard(lang, c.id).catch(() => { failed += 1; return null; })));
       } catch {
+        failed += 1;
         return [];
       }
     }))).flat();
@@ -159,9 +181,14 @@ async function findByNumber(lang, num, total) {
 
   const printed = `${num}/${total}`;
   const seen = new Set();
-  return [...reprints, ...found]
+  const cards = [...reprints, ...found]
     .filter((c) => c && !seen.has(c.id) && seen.add(c.id))
     .map((c) => ({ ...c, printed }));
+  // Some sets did not answer even after retries: say the list may be incomplete
+  // instead of silently showing the wrong edition only.
+  if (failed && !cards.length) throw new Error('Le service des cartes ne répond pas, réessaie dans un instant');
+  cards.incomplete = failed > 0;
+  return cards;
 }
 
 async function findByName(lang, name) {
@@ -542,9 +569,15 @@ function cardmarketLink(name, cardLang) {
   return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${new URLSearchParams({ searchString: name, language })}`;
 }
 
-function renderResults(cards, bestId = null, byNumber = false, others = []) {
+function renderResults(cards, bestId = null, byNumber = false, others = [], incomplete = false) {
   const box = $('results');
   box.innerHTML = '';
+  if (incomplete) {
+    const warn = document.createElement('p');
+    warn.className = 'muted hint';
+    warn.textContent = 'Certaines extensions n\u2019ont pas répondu : ta carte peut manquer dans la liste. Relance la recherche si tu ne la vois pas.';
+    box.appendChild(warn);
+  }
   if (!cards.length) {
     box.innerHTML = '<p class="muted">Aucune carte trouvée. Corrige le numéro ou cherche par nom.</p>';
     return;
@@ -642,14 +675,15 @@ function resultCard(card) {
 async function searchNumber(num, total, topText = '', photo = null) {
   $('results').innerHTML = '<p class="muted">Recherche…</p>';
   try {
-    const ranked = rankByName(await findByNumber(lang(), num, total), topText);
+    const all = await findByNumber(lang(), num, total);
+    const ranked = rankByName(all, topText);
     let { cards } = ranked;
     let best = null;
     if (photo && cards.length > 1) {
       $('results').innerHTML = '<p class="muted">Comparaison avec les images officielles…</p>';
       ({ cards, best } = await rankByImage(cards, photo));
     }
-    renderResults(cards, best, true, ranked.others);
+    renderResults(cards, best, true, ranked.others, all.incomplete);
   } catch (e) {
     $('results').replaceChildren(errorLine(e.message));
   }
@@ -675,12 +709,14 @@ async function identifyPhoto(img, onStep = () => {}) {
   if (detected) $('lang').value = detected;
   if (!hit) return { hit, detected, cards: [], best: null, sure: false };
   onStep(hit, detected);
-  const ranked = rankByName(await findByNumber(lang(), hit.num, hit.total), text.top);
+  const all = await findByNumber(lang(), hit.num, hit.total);
+  const ranked = rankByName(all, text.top);
   let { cards } = ranked;
   let best = null;
   if (cards.length > 1) ({ cards, best } = await rankByImage(cards, img));
-  const sure = cards.length === 1 || Boolean(best);
-  return { hit, detected, cards, others: ranked.others, best, sure, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
+  // A set that did not answer may hold the real card: never add blindly then.
+  const sure = !all.incomplete && (cards.length === 1 || Boolean(best));
+  return { hit, detected, cards, others: ranked.others, best, sure, incomplete: all.incomplete, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
 }
 
 async function scanOne(file) {
@@ -703,7 +739,7 @@ async function scanOne(file) {
       $('manualBox').open = true;
       return;
     }
-    renderResults(res.cards, res.best, true, res.others);
+    renderResults(res.cards, res.best, true, res.others, res.incomplete);
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
     $('results').innerHTML = '';
