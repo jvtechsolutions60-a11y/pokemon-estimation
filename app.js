@@ -230,6 +230,52 @@ async function readCardNumber(img) {
   return null;
 }
 
+// Words printed on every Pokémon card, used to guess the card's language.
+const LANGUAGE_WORDS = {
+  fr: ['faiblesse', 'resistance', 'retraite', 'pouvoir', 'talent', 'niveau', 'evolution de', 'degats'],
+  en: ['weakness', 'resistance', 'retreat', 'ability', 'evolves from', 'stage', 'damage'],
+  de: ['schwache', 'resistenz', 'ruckzug', 'entwickelt sich', 'phase', 'schaden', 'fahigkeit'],
+  it: ['debolezza', 'resistenza', 'ritirata', 'abilita', 'si evolve da', 'fase', 'danni'],
+  es: ['debilidad', 'resistencia', 'retirada', 'habilidad', 'evoluciona de', 'fase', 'dano'],
+  pt: ['fraqueza', 'resistencia', 'recuo', 'habilidade', 'evolui de', 'estagio', 'dano'],
+};
+
+// Lowercase, without accents, so OCR output can be compared loosely.
+function fold(text) {
+  return String(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function detectLanguage(text) {
+  const t = fold(text);
+  let best = null;
+  let bestScore = 0;
+  for (const [code, words] of Object.entries(LANGUAGE_WORDS)) {
+    const score = words.filter((w) => t.includes(w)).length;
+    if (score > bestScore) { best = code; bestScore = score; }
+  }
+  return bestScore >= 2 ? best : null;
+}
+
+// Reads the name (top of the card) and the rules text (middle and bottom).
+async function readCardText(img) {
+  const worker = await getWorker();
+  const read = async (from, to) => (await worker.recognize(prepareBand(img, from, to, 90, false))).data.text;
+  const top = await read(0.03, 0.22);
+  const body = await read(0.5, 0.95);
+  return { top, all: `${top}\n${body}` };
+}
+
+// Puts first the cards whose name appears in the text read at the top of the photo.
+function rankByName(cards, topText) {
+  if (!topText) return cards;
+  const t = fold(topText).replace(/[^a-z0-9]/g, '');
+  const hit = (c) => {
+    const n = fold(c.name).replace(/[^a-z0-9]/g, '');
+    return n.length >= 3 && t.includes(n);
+  };
+  return [...cards.filter(hit), ...cards.filter((c) => !hit(c))];
+}
+
 // ---------- UI: search ----------
 
 function setStatus(msg) {
@@ -238,6 +284,14 @@ function setStatus(msg) {
 
 function lang() {
   return $('lang').value;
+}
+
+// Cardmarket language ids, used to open the listing filtered on the card's language.
+const CARDMARKET_LANG = { en: 1, fr: 2, de: 3, es: 4, it: 5, pt: 8 };
+
+function cardmarketUrl(card) {
+  const q = new URLSearchParams({ searchString: card.name, language: CARDMARKET_LANG[lang()] || 2 });
+  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
 }
 
 function renderResults(cards) {
@@ -268,8 +322,10 @@ function resultCard(card) {
     <div class="muted small"></div>
     <select class="variant"></select>
     <div class="price"></div>
+    <a class="cm small" target="_blank" rel="noopener">Voir sur Cardmarket</a>
     <button type="button">Ajouter</button>`;
   el.querySelector('.title').textContent = card.name;
+  el.querySelector('.cm').href = cardmarketUrl(card);
   el.querySelector('.muted').textContent = card.set && card.set.cardCount ? `${setName} · ${displayNumber(card)}` : `n° ${card.localId}`;
 
   const select = el.querySelector('.variant');
@@ -306,10 +362,10 @@ function resultCard(card) {
   return el;
 }
 
-async function searchNumber(num, total) {
+async function searchNumber(num, total, topText = '') {
   $('results').innerHTML = '<p class="muted">Recherche…</p>';
   try {
-    renderResults(await findByNumber(lang(), num, total));
+    renderResults(rankByName(await findByNumber(lang(), num, total), topText));
   } catch (e) {
     $('results').innerHTML = `<p class="muted">Erreur : ${e.message}</p>`;
   }
@@ -330,17 +386,21 @@ $('photo').addEventListener('change', async (ev) => {
   const img = await loadImage(file);
   $('previewImg').src = img.src;
   $('preview').hidden = false;
-  setStatus('Lecture du numéro de la carte…');
+  setStatus('Lecture de la carte…');
   try {
     const hit = await readCardNumber(img);
+    const text = await readCardText(img).catch(() => ({ top: '', all: '' }));
+    const detected = detectLanguage(text.all);
+    if (detected) $('lang').value = detected;
+    const langLabel = detected ? ` · langue détectée : ${$('lang').selectedOptions[0].text.toLowerCase()}` : '';
     if (!hit) {
-      setStatus('Numéro illisible. Saisis-le ci-dessous (ex. 4 / 102) ou cherche par nom.');
+      setStatus(`Numéro illisible${langLabel}. Saisis-le ci-dessous (ex. 4 / 102) ou cherche par nom.`);
       return;
     }
     $('num').value = hit.num;
     $('total').value = hit.total;
-    setStatus(`Numéro lu : ${hit.num}/${hit.total}. Corrige-le si besoin.`);
-    await searchNumber(hit.num, hit.total);
+    setStatus(`Numéro lu : ${hit.num}/${hit.total}${langLabel}. Corrige si besoin.`);
+    await searchNumber(hit.num, hit.total, text.top);
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
   } finally {
