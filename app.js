@@ -608,33 +608,175 @@ async function searchName(name) {
   }
 }
 
-$('photo').addEventListener('change', async (ev) => {
-  const file = ev.target.files[0];
-  if (!file) return;
+const LANG_NAMES = { fr: 'français', en: 'anglais', de: 'allemand', it: 'italien', es: 'espagnol', pt: 'portugais' };
+
+// Reads one photo: number, language, the matching cards and, when it is clear,
+// which of them is on the photo. `sure` means it can be added without asking.
+async function identifyPhoto(img, onStep = () => {}) {
+  const hit = await readCardNumber(img);
+  const text = await readCardText(img).catch(() => ({ top: '', all: '' }));
+  const detected = detectLanguage(text.all);
+  if (detected) $('lang').value = detected;
+  if (!hit) return { hit, detected, cards: [], best: null, sure: false };
+  onStep(hit, detected);
+  let cards = rankByName(await findByNumber(lang(), hit.num, hit.total), text.top);
+  let best = null;
+  if (cards.length > 1) ({ cards, best } = await rankByImage(cards, img));
+  const sure = cards.length === 1 || Boolean(best);
+  return { hit, detected, cards, best, sure, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
+}
+
+async function scanOne(file) {
   const img = await loadImage(file);
   $('previewImg').src = img.src;
   $('preview').hidden = false;
   setStatus('Lecture de la carte…');
+  $('results').innerHTML = '';
   try {
-    const hit = await readCardNumber(img);
-    const text = await readCardText(img).catch(() => ({ top: '', all: '' }));
-    const detected = detectLanguage(text.all);
-    if (detected) $('lang').value = detected;
-    const LANG_NAMES = { fr: 'français', en: 'anglais', de: 'allemand', it: 'italien', es: 'espagnol', pt: 'portugais' };
-    const langLabel = detected ? ` · langue détectée : ${LANG_NAMES[detected] || detected}` : '';
-    if (!hit) {
+    const res = await identifyPhoto(img, (hit, detected) => {
+      $('num').value = hit.num;
+      $('total').value = hit.total;
+      const langLabel = detected ? ` · langue détectée : ${LANG_NAMES[detected] || detected}` : '';
+      setStatus(`Numéro lu : ${hit.num}/${hit.total}${langLabel}. Corrige si besoin.`);
+      $('results').innerHTML = '<p class="muted">Recherche et comparaison avec les images officielles…</p>';
+    });
+    if (!res.hit) {
+      const langLabel = res.detected ? ` · langue détectée : ${LANG_NAMES[res.detected] || res.detected}` : '';
       setStatus(`Numéro illisible${langLabel}. Saisis-le ci-dessous (ex. 4 / 102) ou cherche par nom.`);
+      $('manualBox').open = true;
       return;
     }
-    $('num').value = hit.num;
-    $('total').value = hit.total;
-    setStatus(`Numéro lu : ${hit.num}/${hit.total}${langLabel}. Corrige si besoin.`);
-    await searchNumber(hit.num, hit.total, text.top, img);
+    renderResults(res.cards, res.best, true);
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
-  } finally {
-    ev.target.value = '';
+    $('results').innerHTML = '';
   }
+}
+
+// ---------- Burst mode ----------
+//
+// Several photos in a row: each card read with certainty is added at once in
+// Near Mint; the others wait in the list with their candidates.
+
+let burstQueue = [];
+let burstRunning = false;
+const burstStats = { added: 0, value: 0, total: 0, done: 0 };
+
+function burstOn() {
+  return $('burst').checked;
+}
+
+function updateBurstUi() {
+  const on = burstOn();
+  $('photo').multiple = on;
+  // Without "capture" the phone offers the camera and the gallery, needed to pick several photos.
+  if (on) $('photo').removeAttribute('capture'); else $('photo').setAttribute('capture', 'environment');
+  $('dropTitle').textContent = on ? 'Prendre ou choisir des photos' : 'Prendre ou choisir une photo';
+  $('dropHint').textContent = on
+    ? 'Plusieurs photos d’un coup possible : chaque carte reconnue est ajoutée en Near Mint'
+    : 'Carte bien à plat, numéro du bas lisible';
+  $('burstPanel').hidden = !on || !burstStats.total;
+  $('preview').hidden = true;
+}
+
+function renderBurstSummary() {
+  const s = burstStats;
+  $('burstSummary').textContent = `${s.done} / ${s.total} photo${s.total > 1 ? 's' : ''} lue${s.total > 1 ? 's' : ''}`
+    + ` · ${s.added} carte${s.added > 1 ? 's' : ''} ajoutée${s.added > 1 ? 's' : ''} · ${euro.format(s.value)}`;
+  $('burstPanel').hidden = false;
+}
+
+function burstRow(img) {
+  const row = document.createElement('li');
+  row.className = 'burst-row';
+  row.innerHTML = '<img alt=""><div class="burst-body"><div class="burst-title">En attente…</div><div class="burst-sub muted small"></div><div class="burst-pick"></div></div>';
+  row.querySelector('img').src = img.src;
+  $('burstList').prepend(row);
+  return row;
+}
+
+function addFromBurst(card, row) {
+  const variant = defaultVariant(card);
+  addToCollection(card, variant, 'NM');
+  const price = marketPrice(card, variant) || 0;
+  burstStats.added += 1;
+  burstStats.value += price;
+  row.classList.add('ok');
+  row.querySelector('.burst-title').textContent = `✓ ${card.name}`;
+  row.querySelector('.burst-sub').textContent = `${card.set ? card.set.name : ''} · ${displayNumber(card)} · ${price ? euro.format(price) : 'prix inconnu'}`;
+  row.querySelector('.burst-pick').innerHTML = '';
+  renderBurstSummary();
+}
+
+async function runBurst() {
+  if (burstRunning) return;
+  burstRunning = true;
+  while (burstQueue.length) {
+    const file = burstQueue.shift();
+    let row = null;
+    try {
+      const img = await loadImage(file);
+      row = burstRow(img);
+      row.querySelector('.burst-title').textContent = 'Lecture…';
+      const res = await identifyPhoto(img, (hit) => {
+        row.querySelector('.burst-title').textContent = `Numéro ${hit.num}/${hit.total} : recherche…`;
+      });
+      if (!res.hit) {
+        row.classList.add('warn');
+        row.querySelector('.burst-title').textContent = 'Numéro illisible';
+        row.querySelector('.burst-sub').textContent = 'Reprends la photo de plus près, ou saisis le numéro en mode normal.';
+      } else if (!res.cards.length) {
+        row.classList.add('warn');
+        row.querySelector('.burst-title').textContent = `Aucune carte ${res.hit.num}/${res.hit.total}`;
+        row.querySelector('.burst-sub').textContent = 'Vérifie la langue choisie en haut, ou le numéro.';
+      } else if (res.sure) {
+        addFromBurst(res.pick, row);
+      } else {
+        row.classList.add('warn');
+        row.querySelector('.burst-title').textContent = 'À vérifier : choisis ta carte';
+        row.querySelector('.burst-sub').textContent = `${res.cards.length} cartes portent le numéro ${res.hit.num}/${res.hit.total}.`;
+        const pick = row.querySelector('.burst-pick');
+        for (const card of res.cards.slice(0, 4)) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'secondary';
+          b.textContent = `${card.name} · ${card.set ? card.set.name : ''}`;
+          b.addEventListener('click', () => { row.classList.remove('warn'); addFromBurst(card, row); });
+          pick.appendChild(b);
+        }
+      }
+    } catch (e) {
+      if (row) {
+        row.classList.add('warn');
+        row.querySelector('.burst-title').textContent = 'Lecture impossible';
+        row.querySelector('.burst-sub').textContent = e.message;
+      }
+    }
+    burstStats.done += 1;
+    renderBurstSummary();
+  }
+  burstRunning = false;
+}
+
+$('photo').addEventListener('change', async (ev) => {
+  const files = [...ev.target.files];
+  ev.target.value = '';
+  if (!files.length) return;
+  if (!burstOn()) {
+    await scanOne(files[0]);
+    return;
+  }
+  burstStats.total += files.length;
+  burstQueue.push(...files);
+  renderBurstSummary();
+  runBurst();
+});
+
+$('burst').addEventListener('change', updateBurstUi);
+$('burstClear').addEventListener('click', () => {
+  $('burstList').innerHTML = '';
+  Object.assign(burstStats, { added: 0, value: 0, total: burstQueue.length, done: 0 });
+  $('burstPanel').hidden = !burstStats.total;
 });
 
 $('manual').addEventListener('submit', (ev) => {
@@ -699,15 +841,17 @@ function renderBrowse() {
   grid.innerHTML = '';
   if (!browseCards.length) return;
   const q = fold($('setFilter').value.trim());
-  const ownedOnly = $('setOwnedOnly').checked;
+  const show = $('setShow').value;
   const owned = browseCards.filter((c) => ownedItem(c.id)).length;
   $('setInfo').textContent = `${browseSetName} : ${owned} / ${browseCards.length} cartes cochées.`;
   $('setProgress').hidden = false;
   $('setProgressBar').style.width = `${(100 * owned) / browseCards.length}%`;
+  renderSetCost();
 
   for (const c of browseCards) {
     const item = ownedItem(c.id);
-    if (ownedOnly && !item) continue;
+    if (show === 'owned' && !item) continue;
+    if (show === 'missing' && item) continue;
     if (q && !fold(c.name).includes(q) && !String(c.localId).includes(q)) continue;
 
     const el = document.createElement('label');
@@ -715,10 +859,12 @@ function renderBrowse() {
     el.innerHTML = `
       ${c.image && safeImage(`${c.image}/low.webp`) ? `<img loading="lazy" src="${safeImage(`${c.image}/low.webp`)}" alt="">` : '<div class="noimg"></div>'}
       <span class="tick-row"><input type="checkbox"> <span class="tick-name"></span></span>
-      <span class="muted small tick-num"></span>
+      <span class="tick-meta"><span class="muted small tick-num"></span><span class="tick-price"></span></span>
       <select class="tick-cond"></select>`;
     el.querySelector('.tick-name').textContent = c.name;
     el.querySelector('.tick-num').textContent = browseOfficial ? `${c.localId}/${browseOfficial}` : c.localId;
+    const known = item ? unitPrice(item) : missingPrices.get(priceKey(c.id));
+    if (typeof known === 'number' && known > 0) el.querySelector('.tick-price').textContent = euro.format(known);
 
     const box = el.querySelector('input');
     const cond = el.querySelector('.tick-cond');
@@ -755,7 +901,79 @@ function renderBrowse() {
 
 $('setSelect').addEventListener('change', (e) => openSet(e.target.value));
 $('setFilter').addEventListener('input', renderBrowse);
-$('setOwnedOnly').addEventListener('change', renderBrowse);
+$('setShow').addEventListener('change', renderBrowse);
+
+// ---------- Missing cards ----------
+//
+// The set listing has no prices: they are fetched card by card, only when asked,
+// and kept for the session.
+
+const missingPrices = new Map();
+let costRun = null;
+
+function priceKey(id) {
+  return `${lang()}:${id}`;
+}
+
+function missingCards() {
+  return browseCards.filter((c) => !ownedItem(c.id));
+}
+
+function renderSetCost() {
+  const box = $('setCost');
+  const missing = missingCards();
+  box.hidden = !browseCards.length;
+  if (!missing.length) {
+    $('setCostText').textContent = 'Extension complète, bravo !';
+    $('setCostBtn').hidden = true;
+    return;
+  }
+  const known = missing.filter((c) => missingPrices.has(priceKey(c.id)));
+  const priced = known.map((c) => missingPrices.get(priceKey(c.id))).filter((p) => typeof p === 'number');
+  const sum = priced.reduce((a, b) => a + b, 0);
+  const label = `Il te manque ${missing.length} carte${missing.length > 1 ? 's' : ''}.`;
+  if (known.length === missing.length) {
+    const unpriced = missing.length - priced.length;
+    $('setCostText').textContent = `${label} Coût estimé pour compléter : ${euro.format(sum)} en Near Mint`
+      + (unpriced ? ` (${unpriced} sans prix connu).` : '.');
+    $('setCostBtn').hidden = true;
+  } else {
+    $('setCostText').textContent = label;
+    $('setCostBtn').hidden = false;
+    if (!costRun) $('setCostBtn').textContent = 'Estimer le coût pour compléter';
+  }
+}
+
+async function estimateSetCost() {
+  if (costRun) return;
+  const todo = missingCards().filter((c) => !missingPrices.has(priceKey(c.id)));
+  const btn = $('setCostBtn');
+  btn.disabled = true;
+  let done = 0;
+  costRun = (async () => {
+    const queue = [...todo];
+    const worker = async () => {
+      while (queue.length) {
+        const c = queue.shift();
+        const key = priceKey(c.id);
+        try {
+          const full = await getCard(lang(), c.id);
+          missingPrices.set(key, marketPrice(full, defaultVariant(full)));
+        } catch { /* left unknown: retried next time */ }
+        done += 1;
+        btn.textContent = `Estimation… ${done} / ${todo.length}`;
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+  })();
+  try { await costRun; } finally {
+    costRun = null;
+    btn.disabled = false;
+    renderBrowse();
+  }
+}
+
+$('setCostBtn').addEventListener('click', estimateSetCost);
 $('lang').addEventListener('change', () => {
   loadSetList();
   openSet('');
@@ -938,10 +1156,123 @@ function renderCollection() {
   $('sumTopName').textContent = top && unitPrice(top) > 0 ? top.name : '';
   $('tabCount').textContent = String(count);
   $('tabCount').hidden = !count;
+  recordHistory(total, count);
+  renderHistory();
 }
 
 $('colFilter').addEventListener('input', renderCollection);
 $('colSort').addEventListener('change', renderCollection);
+
+// ---------- Value history ----------
+//
+// One point per day: the collection's total value and card count, kept on the
+// device and, with an account, inside the encrypted vault.
+
+const HISTORY_KEY = 'pokemon-estimation:history';
+const HISTORY_MAX = 800;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function sanitizeHistory(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => p && DAY_RE.test(p.d) && Number.isFinite(p.v) && p.v >= 0 && Number.isFinite(p.n) && p.n >= 0)
+    .map((p) => ({ d: p.d, v: Math.round(p.v * 100) / 100, n: Math.round(p.n) }))
+    .sort((a, b) => a.d.localeCompare(b.d))
+    .slice(-HISTORY_MAX);
+}
+
+let valueHistory = [];
+try { valueHistory = sanitizeHistory(JSON.parse(safeGet(HISTORY_KEY))); } catch { valueHistory = []; }
+
+function localDay(date = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
+}
+
+function recordHistory(total, count) {
+  if (!count && !valueHistory.length) return;
+  const point = { d: localDay(), v: Math.round(total * 100) / 100, n: count };
+  const last = valueHistory[valueHistory.length - 1];
+  if (last && last.d === point.d) {
+    if (last.v === point.v && last.n === point.n) return;
+    valueHistory[valueHistory.length - 1] = point;
+  } else {
+    valueHistory.push(point);
+    valueHistory = valueHistory.slice(-HISTORY_MAX);
+  }
+  safeSet(HISTORY_KEY, JSON.stringify(valueHistory));
+}
+
+// Days known on another device are added; for a day both know, this device wins.
+function mergeHistory(remote) {
+  const byDay = new Map(sanitizeHistory(remote).map((p) => [p.d, p]));
+  for (const p of valueHistory) byDay.set(p.d, p);
+  valueHistory = sanitizeHistory([...byDay.values()]);
+  safeSet(HISTORY_KEY, JSON.stringify(valueHistory));
+  renderHistory();
+}
+
+let historyRange = 30;
+
+function renderHistory() {
+  const box = $('historyChart');
+  const note = $('historyNote');
+  const from = historyRange ? localDay(new Date(Date.now() - historyRange * 86_400_000)) : '';
+  const points = valueHistory.filter((p) => p.d >= from);
+  for (const b of document.querySelectorAll('[data-range]')) b.classList.toggle('active', Number(b.dataset.range) === historyRange);
+  box.innerHTML = '';
+  if (points.length < 2) {
+    note.textContent = valueHistory.length
+      ? 'La courbe se remplit jour après jour : reviens demain pour voir l’évolution.'
+      : 'Ajoute des cartes : leur valeur sera suivie chaque jour.';
+    $('historyDelta').textContent = '';
+    return;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  const delta = last.v - first.v;
+  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+  $('historyDelta').textContent = `${sign}${euro.format(Math.abs(delta))} depuis le ${new Date(`${first.d}T12:00:00`).toLocaleDateString('fr-FR')}`;
+  $('historyDelta').className = `delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}`;
+  note.textContent = last.n !== first.n
+    ? `Cette variation inclut les cartes ajoutées ou retirées (${first.n} → ${last.n} cartes).`
+    : 'Même nombre de cartes sur la période : la variation vient des prix du marché.';
+
+  const W = 600;
+  const H = 180;
+  const pad = { l: 8, r: 8, t: 12, b: 22 };
+  const t0 = Date.parse(first.d);
+  const span = Math.max(1, Date.parse(last.d) - t0);
+  let lo = Math.min(...points.map((p) => p.v));
+  let hi = Math.max(...points.map((p) => p.v));
+  if (hi - lo < 1) { lo -= 1; hi += 1; }
+  const x = (p) => pad.l + ((Date.parse(p.d) - t0) / span) * (W - pad.l - pad.r);
+  const y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(p).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(last).toFixed(1)},${H - pad.b} L${x(first).toFixed(1)},${H - pad.b} Z`;
+  const fmt = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  box.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Évolution de la valeur de la collection">
+      <defs><linearGradient id="hg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="currentColor" stop-opacity=".28"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/>
+      </linearGradient></defs>
+      <line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(hi).toFixed(1)}" y2="${y(hi).toFixed(1)}"/>
+      <line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(lo).toFixed(1)}" y2="${y(lo).toFixed(1)}"/>
+      <path d="${area}" fill="url(#hg)"/>
+      <path d="${line}" class="hline" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <span class="hdot"></span>
+    <div class="h-axis"><span>${fmt(first.d)}</span><span>${fmt(last.d)}</span></div>
+    <div class="h-scale"><span>${euro.format(hi)}</span><span>${euro.format(lo)}</span></div>`;
+  // Set through the CSSOM: the page's CSP forbids inline style attributes.
+  const dot = box.querySelector('.hdot');
+  dot.style.left = `${((100 * x(last)) / W).toFixed(2)}%`;
+  dot.style.top = `${((160 * y(last.v)) / H).toFixed(1)}px`;
+}
+
+for (const b of document.querySelectorAll('[data-range]')) {
+  b.addEventListener('click', () => { historyRange = Number(b.dataset.range); renderHistory(); });
+}
 
 // ---------- UI: navigation and toast ----------
 
@@ -1122,6 +1453,8 @@ function showAccount(view) {
 }
 
 Sync.init({
+  getExtra: () => ({ history: valueHistory }),
+  onExtra(extra) { if (extra && extra.history) mergeHistory(extra.history); },
   onRemoteCollection(remote, message) {
     collection = sanitizeCollection(remote);
     saveCollection({ fromServer: true });
@@ -1234,6 +1567,34 @@ $('accDelete').addEventListener('click', async () => {
     accMsg(e.message);
   }
 });
+
+// ---------- Install as an app ----------
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => { /* site still works online */ });
+}
+
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $('installBtn').hidden = false;
+});
+$('installBtn').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  $('installBtn').hidden = true;
+});
+window.addEventListener('appinstalled', () => { $('installBtn').hidden = true; });
+
+// iPhone has no install button: show the manual steps once, in Safari only.
+const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (!standalone && /iphone|ipad|ipod/i.test(navigator.userAgent) && !safeGet('pokemon-estimation:ios-hint')) {
+  $('iosHint').hidden = false;
+  safeSet('pokemon-estimation:ios-hint', '1');
+}
 
 showView();
 renderCollection();

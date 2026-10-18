@@ -1,0 +1,20 @@
+{
+  "name": "CoteCartes · Estime ta collection Pokémon",
+  "short_name": "CoteCartes",
+  "description": "Photo ou cases à cocher, prix Cardmarket en euros, sans inscription.",
+  "lang": "fr",
+  "start_url": "./#scan",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f4f8",
+  "theme_color": "#e3350d",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Scanner une carte", "url": "./#scan" },
+    { "name": "Ma collection", "url": "./#collection" }
+  ]
+}

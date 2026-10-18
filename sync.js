@@ -24,6 +24,8 @@ const Sync = (() => {
   let version = 0;
   let pushTimer = null;
   let onRemote = () => {};
+  let getExtra = () => ({});
+  let onExtra = () => {};
   let onState = () => {};
 
   // ---------- Storage ----------
@@ -79,7 +81,7 @@ const Sync = (() => {
 
   async function encrypt(collection) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const plain = enc.encode(JSON.stringify({ v: 1, collection }));
+    const plain = enc.encode(JSON.stringify({ v: 1, ...getExtra(), collection }));
     const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(session.id) }, session.key, plain);
     return { iv: b64(iv), data: b64(cipher) };
   }
@@ -89,7 +91,9 @@ const Sync = (() => {
       { name: 'AES-GCM', iv: unb64(iv), additionalData: enc.encode(session.id) },
       session.key, unb64(data),
     );
-    return JSON.parse(new TextDecoder().decode(plain)).collection;
+    const { collection, v, ...extra } = JSON.parse(new TextDecoder().decode(plain));
+    onExtra(extra);
+    return collection;
   }
 
   // ---------- Server ----------
@@ -158,8 +162,11 @@ const Sync = (() => {
     generateCode,
     normalizeCode,
 
-    init({ onRemoteCollection, onStateChange }) {
+    // getExtra/onExtra carry data saved beside the collection (value history).
+    init({ onRemoteCollection, onStateChange, getExtra: extraGetter, onExtra: extraHandler }) {
       onRemote = onRemoteCollection;
+      if (extraGetter) getExtra = extraGetter;
+      if (extraHandler) onExtra = extraHandler;
       onState = onStateChange;
     },
 

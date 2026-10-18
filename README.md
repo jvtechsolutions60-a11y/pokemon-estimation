@@ -9,6 +9,12 @@ Petite appli web (100 % statique) pour estimer la valeur d'une collection de car
 
 Si la lecture du numéro échoue, on peut le saisir à la main ou chercher par nom.
 
+Aussi :
+- **mode rafale** : plusieurs photos d'un coup, chaque carte reconnue sans ambiguïté est ajoutée en Near Mint, les autres attendent un choix ;
+- **extensions** : cocher ses cartes, afficher les manquantes et estimer le coût pour compléter ;
+- **courbe de valeur** : un point par jour, gardé sur l'appareil et dans le coffre chiffré du compte ;
+- **appli installable** (PWA, `sw.js`) : fonctionne hors ligne avec les dernières données chargées.
+
 ## Compte anonyme et chiffré
 
 Pas de nom, d'email, de mot de passe ni d'adresse : un compte est un **code secret** aléatoire de 20 caractères (100 bits), généré dans le navigateur.
