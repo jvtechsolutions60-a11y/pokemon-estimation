@@ -76,6 +76,7 @@ function sanitizeCollection(list) {
     const market = num(i.marketPrice);
     if (market !== undefined) item.marketPrice = market;
     if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
+    if (Number.isInteger(i.cmId) && i.cmId > 0) item.cmId = i.cmId;
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
     if (date && !Number.isNaN(Date.parse(date))) item.marketDate = date;
@@ -226,6 +227,8 @@ function defaultVariant(card) {
 // different snapshots. Only take a price that is newer than the one we have,
 // so the value stays put until Cardmarket really publishes a new one.
 function applyMarket(item, card, { force = false } = {}) {
+  const cmId = cardmarketProductId(card);
+  if (cmId) item.cmId = cmId;
   const cm = card && card.pricing && card.pricing.cardmarket;
   const updated = cm && cm.updated ? Date.parse(cm.updated) : NaN;
   const known = item.marketDate ? Date.parse(item.marketDate) : NaN;
@@ -235,6 +238,7 @@ function applyMarket(item, card, { force = false } = {}) {
   if (price === null && !force) return false;
   item.marketPrice = price;
   item.marketDate = cm && cm.updated ? cm.updated : null;
+
   const key = marketPriceKey(card, item.variant);
   if (key) item.marketKey = key.replace('-holo', ''); else delete item.marketKey;
   return true;
@@ -522,9 +526,21 @@ function lang() {
 // Cardmarket language ids, used to open the listing filtered on the card's language.
 const CARDMARKET_LANG = { en: 1, fr: 2, de: 3, es: 4, it: 5, pt: 8 };
 
+// TCGdex prices carry Cardmarket's product id: link straight to that card's
+// page (filtered on the card's language), or fall back to a name search.
+function cardmarketProductId(card) {
+  const id = card && card.pricing && card.pricing.cardmarket && card.pricing.cardmarket.idProduct;
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function cardmarketLink(productId, name, cardLang) {
+  const language = CARDMARKET_LANG[cardLang] || 2;
+  if (productId) return `https://www.cardmarket.com/fr/Pokemon/Products?${new URLSearchParams({ idProduct: productId, language })}`;
+  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${new URLSearchParams({ searchString: name, language })}`;
+}
+
 function cardmarketUrl(card) {
-  const q = new URLSearchParams({ searchString: card.name, language: CARDMARKET_LANG[lang()] || 2 });
-  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
+  return cardmarketLink(cardmarketProductId(card), card.name, lang());
 }
 
 function renderResults(cards, bestId = null, byNumber = false, others = []) {
@@ -1389,16 +1405,12 @@ function cheapestAverage(prices, n) {
 let cmItem = null;
 let cmValue = null;
 
-function cardmarketSearchUrl(name, itemLang) {
-  const q = new URLSearchParams({ searchString: name, language: CARDMARKET_LANG[itemLang] || 2 });
-  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
-}
 
 function openCardmarketDialog(item) {
   cmItem = item;
   cmValue = null;
   $('cmCard').textContent = `${item.name} · ${item.set} · ${item.number} · ${item.lang.toUpperCase()}`;
-  $('cmLink').href = cardmarketSearchUrl(item.name, item.lang);
+  $('cmLink').href = cardmarketLink(item.cmId, item.name, item.lang);
   $('cmText').value = '';
   $('cmResult').textContent = '';
   $('cmApply').disabled = true;
