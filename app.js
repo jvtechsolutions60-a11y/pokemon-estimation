@@ -37,6 +37,11 @@ function safeSet(key, value) {
 
 let collection = [];
 try { collection = JSON.parse(safeGet(STORE_KEY)) || []; } catch { collection = []; }
+// Older entries kept the Cardmarket date in priceDate.
+for (const item of collection) {
+  if (!item.marketDate && item.priceDate && typeof item.manualPrice !== 'number') item.marketDate = item.priceDate;
+  delete item.priceDate;
+}
 
 function saveCollection({ fromServer = false } = {}) {
   safeSet(STORE_KEY, JSON.stringify(collection));
@@ -159,6 +164,29 @@ function defaultVariant(card) {
   if (v.holo) return 'holo';
   if (v.reverse) return 'reverse';
   return 'normal';
+}
+
+// TCGdex answers through several caches, so two refreshes in a row can return
+// different snapshots. Only take a price that is newer than the one we have,
+// so the value stays put until Cardmarket really publishes a new one.
+function applyMarket(item, card, { force = false } = {}) {
+  const cm = card && card.pricing && card.pricing.cardmarket;
+  const updated = cm && cm.updated ? Date.parse(cm.updated) : NaN;
+  const known = item.marketDate ? Date.parse(item.marketDate) : NaN;
+  if (!force && Number.isFinite(known) && !(updated > known)) return false;
+  if (!force && !Number.isFinite(updated) && typeof item.marketPrice === 'number') return false;
+  const price = marketPrice(card, item.variant);
+  if (price === null && !force) return false;
+  item.marketPrice = price;
+  item.marketDate = cm && cm.updated ? cm.updated : null;
+  return true;
+}
+
+function priceSourceLabel(item) {
+  if (typeof item.manualPrice === 'number') return item.priceSource || 'Prix saisi à la main';
+  if (typeof item.marketPrice !== 'number') return 'Pas de prix';
+  const day = item.marketDate ? ` au ${new Date(item.marketDate).toLocaleDateString('fr-FR')}` : '';
+  return `Moyenne des ventes 7 j${day}`;
 }
 
 function unitPrice(item) {
@@ -703,9 +731,8 @@ function addToCollection(card, variant, condition = 'NM') {
       variant,
       condition,
       qty: 1,
-      marketPrice: marketPrice(card, variant),
-      priceDate: card.pricing && card.pricing.cardmarket ? card.pricing.cardmarket.updated : null,
     });
+    applyMarket(collection[collection.length - 1], card, { force: true });
   }
   saveCollection();
   renderCollection();
@@ -730,19 +757,20 @@ function renderCollection() {
       <td><select class="c-variant"></select></td>
       <td><select class="c-cond"></select></td>
       <td><input class="qty" type="number" min="1" value="${item.qty}"></td>
-      <td class="num"><input class="c-price" type="number" min="0" step="0.01" value="${unit.toFixed(2)}"></td>
+      <td class="num"><input class="c-price" type="number" min="0" step="0.01" value="${unit.toFixed(2)}"><div class="muted small c-src"></div></td>
       <td class="num">${euro.format(unit * item.qty)}</td>
       <td><button type="button" class="link cm-open" title="Prix depuis les offres Cardmarket">€ CM</button><button type="button" class="link" title="Retirer">✕</button></td>`;
     tr.querySelector('.c-name').textContent = item.name;
     tr.querySelector('.c-set').textContent = item.set;
     tr.querySelector('.c-num').textContent = item.number;
+    tr.querySelector('.c-src').textContent = priceSourceLabel(item);
 
     const variantSel = tr.querySelector('.c-variant');
     for (const [k, label] of Object.entries(VARIANTS)) variantSel.appendChild(new Option(label, k));
     variantSel.value = item.variant;
     variantSel.addEventListener('change', async () => {
       item.variant = variantSel.value;
-      try { item.marketPrice = marketPrice(await getCard(item.lang, item.id), item.variant); } catch { /* keep old price */ }
+      try { applyMarket(item, await getCard(item.lang, item.id), { force: true }); } catch { /* keep old price */ }
       saveCollection();
       renderCollection();
     });
@@ -857,7 +885,6 @@ $('cmApply').addEventListener('click', () => {
   if (cmItem && cmValue !== null) {
     cmItem.manualPrice = cmValue;
     cmItem.priceSource = `Cardmarket, ${$('cmCount').value} offres les moins chères`;
-    cmItem.priceDate = new Date().toISOString();
     saveCollection();
     renderCollection();
   }
@@ -868,17 +895,19 @@ $('refresh').addEventListener('click', async () => {
   const btn = $('refresh');
   btn.disabled = true;
   btn.textContent = 'Actualisation…';
+  let changed = 0;
   for (const item of collection) {
     try {
-      const card = await getCard(item.lang, item.id);
-      item.marketPrice = marketPrice(card, item.variant);
-      item.priceDate = card.pricing && card.pricing.cardmarket ? card.pricing.cardmarket.updated : item.priceDate;
+      if (applyMarket(item, await getCard(item.lang, item.id))) changed += 1;
     } catch { /* keep old price */ }
   }
   saveCollection();
   renderCollection();
   btn.disabled = false;
   btn.textContent = 'Actualiser les prix';
+  $('refreshInfo').textContent = changed
+    ? `${changed} prix mis à jour avec les nouvelles ventes Cardmarket.`
+    : 'Aucun nouveau prix Cardmarket depuis la dernière actualisation : les prix restent les mêmes.';
 });
 
 function csvCell(v) {
@@ -894,7 +923,7 @@ $('export').addEventListener('click', () => {
     lines.push([
       item.name, item.set, item.number, item.lang.toUpperCase(), VARIANTS[item.variant],
       item.condition, item.qty, unit.toFixed(2).replace('.', ','),
-      (unit * item.qty).toFixed(2).replace('.', ','), item.priceDate ? item.priceDate.slice(0, 10) : '',
+      (unit * item.qty).toFixed(2).replace('.', ','), item.marketDate ? item.marketDate.slice(0, 10) : '',
     ].map(csvCell).join(';'));
   }
   // BOM so Excel opens accented characters correctly.

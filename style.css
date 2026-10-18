@@ -78,6 +78,7 @@ th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: l
 tbody tr:hover { background: var(--row-hover); }
 td img { height: 48px; border-radius: 3px; }
 td input { width: 80px; padding: 4px 6px; }
+td .c-src { white-space: normal; max-width: 160px; margin-left: auto; }
 td input.qty { width: 56px; }
 td select { padding: 4px 6px; }
 td.num, th.num { text-align: right; }
