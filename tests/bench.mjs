@@ -1,0 +1,144 @@
+// Test bench: ~100 real cards from TCGdex, read by the app as a clean scan and
+// as a simulated phone photo (background, tilt, lighting, blur, JPEG).
+// Usage: node bench.mjs [cards=100] [seed=1]   (needs internet: run by CI)
+import { writeFile, mkdir } from 'node:fs/promises';
+import { startSite, openSite } from './helpers.mjs';
+
+const COUNT = Number(process.argv[2] || 100);
+const SEED = Number(process.argv[3] || 1);
+const OUT = new URL('./bench-results/', import.meta.url);
+
+const site = await startSite();
+const { browser, page, errors } = await openSite(site);
+
+// Picks the cards: sets spread over the whole history, a few cards each.
+const sample = await page.evaluate(async ({ count, seed }) => {
+  let s = seed >>> 0;
+  const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const sets = (await getSets('fr')).filter((x) => x.cardCount && x.cardCount.official >= 10 && !/classi|promo|mcdonald/i.test(x.name));
+  const perSet = 4;
+  const nSets = Math.ceil(count / perSet);
+  const picked = [];
+  for (let i = 0; i < nSets; i++) {
+    const set = sets[Math.floor((i + rand()) * sets.length / nSets)];
+    try {
+      const full = await getJSON(`${API}/fr/sets/${set.id}`);
+      const pool = (full.cards || []).filter((c) => /^\d+$/.test(c.localId));
+      for (let k = 0; k < perSet && pool.length; k++) {
+        const c = pool.splice(Math.floor(rand() * pool.length), 1)[0];
+        picked.push({ id: c.id, name: c.name, set: set.name, setId: set.id, num: parseInt(c.localId, 10), total: set.cardCount.official });
+      }
+    } catch { /* set unavailable: skip */ }
+  }
+  return picked.slice(0, count);
+}, { count: COUNT, seed: SEED });
+
+console.log(`${sample.length} cartes tirées`);
+
+async function runOne(card, mode, seed) {
+  return page.evaluate(async ({ card, mode, seed }) => {
+    let s = seed >>> 0;
+    const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    const full = await getCard('fr', card.id);
+    if (!full.image) return { skipped: 'pas d’image' };
+    const blob = await (await fetch(`${full.image}/high.png`)).blob();
+    let file = new File([blob], 'carte.png', { type: blob.type });
+    if (mode === 'photo') {
+      // Card lying on a table, shot slightly tilted, under uneven light.
+      const src = await loadImage(file);
+      const W = 1200; const H = 1600;
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const g = c.getContext('2d');
+      const hue = Math.floor(rand() * 360);
+      const grad = g.createLinearGradient(0, 0, W, H);
+      grad.addColorStop(0, `hsl(${hue} 25% ${30 + rand() * 40}%)`);
+      grad.addColorStop(1, `hsl(${(hue + 40) % 360} 20% ${20 + rand() * 40}%)`);
+      g.fillStyle = grad; g.fillRect(0, 0, W, H);
+      const h = H * (0.72 + rand() * 0.18);
+      const w = h * src.naturalWidth / src.naturalHeight;
+      g.save();
+      g.translate(W / 2 + (rand() - 0.5) * 80, H / 2 + (rand() - 0.5) * 80);
+      g.rotate((rand() - 0.5) * 0.12); // about ±3.5°
+      g.filter = `brightness(${0.8 + rand() * 0.4}) contrast(${0.85 + rand() * 0.25}) blur(${(rand() * 1.2).toFixed(2)}px)`;
+      g.drawImage(src, -w / 2, -h / 2, w, h);
+      g.restore();
+      // Light falling from one side.
+      const light = g.createRadialGradient(W * rand(), H * rand(), 50, W / 2, H / 2, W);
+      light.addColorStop(0, 'rgba(255,255,240,0.18)');
+      light.addColorStop(1, 'rgba(0,0,0,0.12)');
+      g.fillStyle = light; g.fillRect(0, 0, W, H);
+      const jpeg = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.78));
+      file = new File([jpeg], 'photo.jpg', { type: 'image/jpeg' });
+    }
+    $('lang').value = 'fr';
+    const t0 = performance.now();
+    const img = await loadImage(file);
+    const res = await identifyPhoto(img);
+    const ms = Math.round(performance.now() - t0);
+    const listIds = [...(res.cards || []), ...(res.others || [])].map((c) => c.id);
+    return {
+      read: res.hit ? `${res.hit.num}/${res.hit.total}` : null,
+      numberOk: Boolean(res.hit && res.hit.num === card.num && res.hit.total === card.total),
+      lang: res.detected,
+      candidates: listIds.length,
+      listed: listIds.includes(card.id),
+      rank: (res.cards || []).findIndex((c) => c.id === card.id),
+      sure: res.sure,
+      pick: res.pick ? res.pick.id : null,
+      ms,
+    };
+  }, { card, mode, seed });
+}
+
+const rows = [];
+for (const [i, card] of sample.entries()) {
+  for (const mode of ['scan', 'photo']) {
+    let r;
+    try {
+      r = await Promise.race([runOne(card, mode, SEED * 1000 + i), new Promise((_, rej) => setTimeout(() => rej(new Error('délai dépassé')), 120000))]);
+    } catch (e) {
+      r = { error: String(e.message || e).slice(0, 200) };
+    }
+    rows.push({ ...card, mode, ...r });
+    console.log(i + 1, mode, card.id, `${card.num}/${card.total}`, JSON.stringify(r));
+  }
+}
+
+const pct = (n, d) => (d ? `${Math.round((100 * n) / d)} %` : '–');
+let md = `# Banc d'essai : ${sample.length} cartes (graine ${SEED})\n\n`;
+md += '| | Scan propre | Photo simulée |\n|---|---|---|\n';
+const stats = {};
+for (const mode of ['scan', 'photo']) {
+  const all = rows.filter((r) => r.mode === mode && !r.skipped);
+  const ok = all.filter((r) => !r.error);
+  stats[mode] = {
+    total: all.length,
+    numberOk: ok.filter((r) => r.numberOk).length,
+    listed: ok.filter((r) => r.listed).length,
+    autoOk: ok.filter((r) => r.sure && r.pick === r.id).length,
+    autoWrong: ok.filter((r) => r.sure && r.pick !== r.id).length,
+    errors: all.length - ok.length,
+    ms: Math.round(ok.reduce((a, r) => a + r.ms, 0) / (ok.length || 1)),
+  };
+}
+const line = (label, key, fmt = (m) => pct(stats[m][key], stats[m].total)) => { md += `| ${label} | ${fmt('scan')} | ${fmt('photo')} |\n`; };
+line('Cartes testées', 'total', (m) => String(stats[m].total));
+line('Numéro bien lu', 'numberOk');
+line('Bonne carte dans la liste', 'listed');
+line('Ajout automatique correct', 'autoOk');
+line('Ajout automatique **faux**', 'autoWrong');
+line('Erreurs techniques', 'errors', (m) => String(stats[m].errors));
+line('Temps moyen par carte', 'ms', (m) => `${(stats[m].ms / 1000).toFixed(1)} s`);
+md += '\n## Échecs\n\n| Mode | Carte | Extension | Attendu | Lu | Dans la liste | Choix auto |\n|---|---|---|---|---|---|---|\n';
+for (const r of rows.filter((x) => !x.skipped && (x.error || !x.numberOk || !x.listed || (x.sure && x.pick !== x.id)))) {
+  md += `| ${r.mode} | ${r.name} (${r.id}) | ${r.set} | ${r.num}/${r.total} | ${r.error ? `erreur : ${r.error}` : r.read || 'rien'} | ${r.listed ? 'oui' : 'non'} | ${r.sure ? r.pick : '–'} |\n`;
+}
+if (errors.length) md += `\nErreurs JavaScript : ${[...new Set(errors)].join(' · ')}\n`;
+
+await mkdir(OUT, { recursive: true });
+await writeFile(new URL('results.json', OUT), JSON.stringify({ seed: SEED, stats, rows }, null, 1));
+await writeFile(new URL('RESULTATS.md', OUT), md);
+console.log(md);
+await browser.close();
+site.close();

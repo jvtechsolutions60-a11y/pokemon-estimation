@@ -1,0 +1,42 @@
+name: Banc d'essai
+
+on:
+  workflow_dispatch:
+    inputs:
+      cards:
+        description: Nombre de cartes
+        default: '100'
+      seed:
+        description: Graine du tirage (même graine = mêmes cartes)
+        default: '1'
+
+permissions:
+  contents: write # results are pushed to the banc-essai branch
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: node bench.mjs "${{ inputs.cards }}" "${{ inputs.seed }}"
+      - run: cat bench-results/RESULTATS.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Publier les résultats sur la branche banc-essai
+        run: |
+          dir="$RUNNER_TEMP/out"
+          git fetch origin banc-essai && git worktree add "$dir" origin/banc-essai || git worktree add --detach "$dir"
+          name="$(date -u +%Y%m%d-%H%M)-${{ github.sha }}"
+          mkdir -p "$dir/$name"
+          cp bench-results/* "$dir/$name/"
+          cd "$dir"
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -m "Banc d'essai $name" && git push origin HEAD:banc-essai
