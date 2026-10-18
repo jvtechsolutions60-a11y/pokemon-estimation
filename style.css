@@ -96,3 +96,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .card .cm { color: var(--muted); }
 .card.best { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .card .badge { color: var(--accent); font-weight: 700; font-size: .85rem; }
+dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); width: min(520px, calc(100vw - 32px)); padding: 16px; }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.cm-form h3 { margin: 0 0 6px; }
+.cm-form ol { padding-left: 20px; }
+.cm-form textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }

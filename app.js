@@ -621,7 +621,7 @@ function renderCollection() {
       <td><input class="qty" type="number" min="1" value="${item.qty}"></td>
       <td class="num"><input class="c-price" type="number" min="0" step="0.01" value="${unit.toFixed(2)}"></td>
       <td class="num">${euro.format(unit * item.qty)}</td>
-      <td><button type="button" class="link" title="Retirer">✕</button></td>`;
+      <td><button type="button" class="link cm-open" title="Prix depuis les offres Cardmarket">€ CM</button><button type="button" class="link" title="Retirer">✕</button></td>`;
     tr.querySelector('.c-name').textContent = item.name;
     tr.querySelector('.c-set').textContent = item.set;
     tr.querySelector('.c-num').textContent = item.number;
@@ -659,7 +659,9 @@ function renderCollection() {
       renderCollection();
     });
 
-    tr.querySelector('.link').addEventListener('click', () => {
+    tr.querySelector('.cm-open').addEventListener('click', () => openCardmarketDialog(item));
+
+    tr.querySelector('.link:not(.cm-open)').addEventListener('click', () => {
       collection.splice(idx, 1);
       saveCollection();
       renderCollection();
@@ -671,6 +673,84 @@ function renderCollection() {
   $('grandTotal').textContent = euro.format(total);
   $('count').textContent = count ? `(${count} carte${count > 1 ? 's' : ''})` : '';
 }
+
+// ---------- Cardmarket offers ----------
+//
+// Cardmarket has no public API and blocks scripts, so the user copies the
+// offers page from their own browser and we average the cheapest offers.
+
+// Labels of Cardmarket's summary block ("De 40,00 €", "Tendance des prix 31,88 €"…)
+// in the languages the site is shown in.
+const CM_STAT_LABELS = /^\s*(de|from|ab|tendance|price trend|preistrend|prix moyen|average price|durchschnittspreis|disponible|available|articles)\b/i;
+const PRICE_RE = /(\d{1,3}(?:[ .\u00a0\u202f]\d{3})+|\d+)[,.](\d{2})\s*€/g;
+
+// Prices of the individual offers found in the pasted page text.
+function parseOfferPrices(text) {
+  const prices = [];
+  let afterLabel = false;
+  for (const line of String(text).split(/\n/)) {
+    if (!line.trim()) continue;
+    const isLabel = CM_STAT_LABELS.test(line);
+    // The value sits on the label's line or, depending on the browser, on the next one.
+    const priceOnly = /^\s*[\d .,\u00a0\u202f]+€\s*$/.test(line);
+    const skip = isLabel || (afterLabel && priceOnly);
+    afterLabel = isLabel && !PRICE_RE.test(line);
+    PRICE_RE.lastIndex = 0;
+    if (skip) continue;
+    for (const m of line.matchAll(PRICE_RE)) {
+      const v = parseFloat(`${m[1].replace(/[ .\u00a0\u202f]/g, '')}.${m[2]}`);
+      if (v > 0) prices.push(v);
+    }
+  }
+  return prices;
+}
+
+function cheapestAverage(prices, n) {
+  const sorted = [...prices].sort((a, b) => a - b).slice(0, n);
+  if (!sorted.length) return null;
+  return { avg: sorted.reduce((a, b) => a + b, 0) / sorted.length, used: sorted.length, min: sorted[0], max: sorted[sorted.length - 1] };
+}
+
+let cmItem = null;
+let cmValue = null;
+
+function cardmarketSearchUrl(name, itemLang) {
+  const q = new URLSearchParams({ searchString: name, language: CARDMARKET_LANG[itemLang] || 2 });
+  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
+}
+
+function openCardmarketDialog(item) {
+  cmItem = item;
+  cmValue = null;
+  $('cmCard').textContent = `${item.name} · ${item.set} · ${item.number} · ${item.lang.toUpperCase()}`;
+  $('cmLink').href = cardmarketSearchUrl(item.name, item.lang);
+  $('cmText').value = '';
+  $('cmResult').textContent = '';
+  $('cmApply').disabled = true;
+  $('cmDialog').showModal();
+}
+
+function updateCardmarketResult() {
+  const res = cheapestAverage(parseOfferPrices($('cmText').value), parseInt($('cmCount').value, 10));
+  cmValue = res ? Math.round(res.avg * 100) / 100 : null;
+  $('cmApply').disabled = cmValue === null;
+  $('cmResult').textContent = res
+    ? `Moyenne de ${res.used} offre${res.used > 1 ? 's' : ''} : ${euro.format(res.avg)} (de ${euro.format(res.min)} à ${euro.format(res.max)})`
+    : ($('cmText').value.trim() ? 'Aucun prix trouvé dans le texte collé.' : '');
+}
+
+$('cmText').addEventListener('input', updateCardmarketResult);
+$('cmCount').addEventListener('change', updateCardmarketResult);
+$('cmApply').addEventListener('click', () => {
+  if (cmItem && cmValue !== null) {
+    cmItem.manualPrice = cmValue;
+    cmItem.priceSource = `Cardmarket, ${$('cmCount').value} offres les moins chères`;
+    cmItem.priceDate = new Date().toISOString();
+    saveCollection();
+    renderCollection();
+  }
+  $('cmDialog').close();
+});
 
 $('refresh').addEventListener('click', async () => {
   const btn = $('refresh');

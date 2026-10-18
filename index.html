@@ -127,6 +127,32 @@
     </section>
   </main>
 
+  <dialog id="cmDialog">
+    <form method="dialog" class="cm-form">
+      <h3>Prix depuis Cardmarket</h3>
+      <p class="muted small" id="cmCard"></p>
+      <ol class="small">
+        <li><a id="cmLink" target="_blank" rel="noopener">Ouvre la carte sur Cardmarket</a>, filtre la langue et l'état.</li>
+        <li>Sélectionne tout le texte de la page (Ctrl+A ou appui long → « Tout sélectionner »), copie-le.</li>
+        <li>Colle-le ici :</li>
+      </ol>
+      <textarea id="cmText" rows="6" placeholder="Colle ici le texte de la page Cardmarket"></textarea>
+      <div class="row">
+        <label>Moyenne des
+          <select id="cmCount">
+            <option value="10" selected>10 offres les moins chères</option>
+            <option value="20">20 offres les moins chères</option>
+          </select>
+        </label>
+      </div>
+      <p id="cmResult" class="status"></p>
+      <div class="row">
+        <button type="button" id="cmApply" disabled>Utiliser ce prix</button>
+        <button value="cancel" class="secondary">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
   <script src="sync.js"></script>
   <script src="app.js"></script>
