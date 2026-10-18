@@ -96,6 +96,15 @@ async function runOne(card, mode, seed) {
     const res = await identifyPhoto(img);
     const ms = Math.round(performance.now() - t0);
     const listIds = [...(res.cards || []), ...(res.others || [])].map((c) => c.id);
+    // What the OCR saw when no number came out, to tune the passes.
+    let ocr = null;
+    if (!res.hit || res.hit.num !== card.num || res.hit.total !== card.total) {
+      const w = await getWorker();
+      ocr = [];
+      for (const [from, to, threshold, invert] of OCR_PASSES.slice(0, 2)) {
+        ocr.push((await w.recognize(prepareBand(img, from, to, threshold, invert))).data.text.replace(/\s+/g, ' ').slice(0, 160));
+      }
+    }
     return {
       read: res.hit ? `${res.hit.num}/${res.hit.total}` : null,
       numberOk: Boolean(res.hit && res.hit.num === card.num && res.hit.total === card.total),
@@ -106,6 +115,7 @@ async function runOne(card, mode, seed) {
       sure: res.sure,
       pick: res.pick ? res.pick.id : null,
       ms,
+      ocr,
     };
   }, { card, mode, seed, png });
 }
