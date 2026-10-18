@@ -28,13 +28,20 @@ test('numéro mal lu : variantes plausibles, seulement avec un vrai total d\u201
   const r = await page.evaluate(() => {
     const totals = new Set([165, 193, 147]);
     const g = (hits) => numberGuesses(hits, totals).map((x) => `${x.num}/${x.total}`);
-    return { dot: parseNumber('Moyen 128.165 @'), rattata: g([{ num: 120, total: 165 }]), sv: g([{ num: 906, total: 793 }]) };
+    return {
+      dot: parseNumber('Moyen 128.165 @'),
+      rattata: g([{ num: 120, total: 165 }]),
+      sv: g([{ num: 906, total: 793 }]),
+      stray: numberGuesses(parseNumbers('Mintenge 78/1130 kL · © 490/001 © · Ns 32,95'), new Set([113, 91, 95])).map((x) => `${x.num}/${x.total}`),
+    };
   });
   assert.deepEqual(r.dot, { num: 128, total: 165 });
   assert.equal(r.rattata[0], '120/165');
   assert.ok(r.rattata.includes('128/165'));
   assert.ok(r.sv.includes('6/193'), r.sv.join(' '));
   assert.ok(!r.sv.some((x) => x.endsWith('/793')));
+  for (const want of ['78/113', '190/91', '82/95']) assert.ok(r.stray.includes(want), `${want} absent de ${r.stray.join(' ')}`);
+
 }));
 
 test('nom lu sur la photo, même abîmé par l’OCR', () => withPage({}, async (page) => {

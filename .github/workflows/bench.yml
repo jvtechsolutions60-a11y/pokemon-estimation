@@ -9,6 +9,9 @@ on:
       seed:
         description: Graine du tirage (même graine = mêmes cartes)
         default: '1'
+      app_ref:
+        description: Version du site à tester (commit), vide = la dernière
+        default: ''
 
 permissions:
   contents: write # results are pushed to the banc-essai branch
@@ -22,6 +25,12 @@ jobs:
         working-directory: tests
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version du site à comparer
+        if: inputs.app_ref != ''
+        working-directory: .
+        run: git checkout "${{ inputs.app_ref }}" -- app.js sync.js index.html
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -33,7 +42,7 @@ jobs:
         run: |
           dir="$RUNNER_TEMP/out"
           git fetch origin banc-essai && git worktree add "$dir" origin/banc-essai || git worktree add --orphan -b banc-essai "$dir"
-          name="$(date -u +%Y%m%d-%H%M)-${{ github.sha }}"
+          name="$(date -u +%Y%m%d-%H%M%S)-graine${{ inputs.seed }}-${{ inputs.app_ref || github.sha }}"
           mkdir -p "$dir/$name"
           cp bench-results/* "$dir/$name/"
           cd "$dir"

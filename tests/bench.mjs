@@ -20,7 +20,7 @@ const { browser, page, errors } = await openSite(site);
 const sample = await page.evaluate(async ({ count, seed }) => {
   let s = seed >>> 0;
   const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-  const sets = (await getSets('fr')).filter((x) => x.cardCount && x.cardCount.official >= 10 && !/classi|promo|mcdonald/i.test(x.name));
+  const sets = (await getSets('fr')).filter((x) => x.cardCount && x.cardCount.official >= 10 && !/classi|promo|mcdonald/i.test(x.name) && !/^(?:[AB]\d+[a-z]?|P-[A-Z])$/.test(x.id));
   const perSet = 4;
   const nSets = Math.ceil(count / perSet);
   const picked = [];
@@ -28,7 +28,7 @@ const sample = await page.evaluate(async ({ count, seed }) => {
     const set = sets[Math.floor((i + rand()) * sets.length / nSets)];
     try {
       const full = await getJSON(`${API}/fr/sets/${set.id}`);
-      const pool = (full.cards || []).filter((c) => /^\d+$/.test(c.localId));
+      const pool = (full.cards || []).filter((c) => /^\d+$/.test(c.localId) && c.image);
       for (let k = 0; k < perSet && pool.length; k++) {
         const c = pool.splice(Math.floor(rand() * pool.length), 1)[0];
         picked.push({ id: c.id, name: c.name, set: set.name, setId: set.id, num: parseInt(c.localId, 10), total: set.cardCount.official });

@@ -347,23 +347,27 @@ function prepareBand(img, fromY, toY, threshold, invert) {
   return canvas;
 }
 
-// Every "num/total" read in the text. OCR often turns the slash into a dot or a bar.
+// Secret rares go past the set size (190/91 in Destinées de Paldea).
+const plausible = (num, total) => num > 0 && total >= 10 && num <= Math.max(total * 2, total + 130);
+
+// Every "num/total" read in the text, with the digits as read (leading zeros
+// kept, for the lookalike fixes). OCR often turns the slash into . , or |,
+// and adds a stray digit after the total (78/1130).
 function parseNumbers(text) {
-  return [...text.matchAll(/(?<![\d,])(\d{1,3})\s*[/.|\\]\s*(\d{2,3})(?![\d,])/g)]
-    .map((m) => ({ num: parseInt(m[1], 10), total: parseInt(m[2], 10) }))
-    .filter((m) => m.num > 0 && m.total >= 10 && m.num <= m.total * 2);
+  return [...text.matchAll(/(?<!\d)(\d{1,3})\s*[/.,|\\]\s*(\d{2,4})(?!\d)/g)]
+    .map((m) => ({ num: parseInt(m[1], 10), total: parseInt(m[2].slice(0, 3), 10), digits: [m[1], m[2].slice(0, 3)] }));
 }
 
 // The most plausible "num/total" read in the text.
 function parseNumber(text) {
-  return parseNumbers(text)[0] || null;
+  const m = parseNumbers(text).find((x) => plausible(x.num, x.total));
+  return m ? { num: m.num, total: m.total } : null;
 }
 
 // Digits Tesseract mixes up on the small print of cards.
 const DIGIT_LOOKALIKES = { 0: '896', 1: '74', 2: '7', 3: '85', 4: '1', 5: '638', 6: '05', 7: '12', 8: '0365', 9: '0' };
 
-function lookalikes(n) {
-  const digits = String(n);
+function lookalikes(digits) {
   const out = [];
   for (let i = 0; i < digits.length; i++) {
     for (const d of DIGIT_LOOKALIKES[digits[i]] || '') out.push(parseInt(digits.slice(0, i) + d + digits.slice(i + 1), 10));
@@ -373,22 +377,24 @@ function lookalikes(n) {
 }
 
 // Readings to try, best first: what was read, then the same with one digit
-// fixed, kept only when the total is a real set size.
+// of the total and/or of the number fixed. Only real set sizes are kept.
 function numberGuesses(hits, totals) {
   const seen = new Set();
   const out = [];
   const add = (num, total) => {
     const key = `${num}/${total}`;
-    if (!totals.has(total) || num > total * 2 || seen.has(key)) return;
+    if (!totals.has(total) || !plausible(num, total) || seen.has(key)) return;
     seen.add(key);
     out.push({ num, total });
   };
+  const digitsOf = (h) => h.digits || [String(h.num), String(h.total)];
   for (const h of hits) add(h.num, h.total);
   for (const h of hits) {
-    const fixedTotals = totals.has(h.total) ? [h.total] : lookalikes(h.total).filter((t) => totals.has(t));
-    for (const t of fixedTotals) {
+    const [nd, td] = digitsOf(h);
+    const tots = [h.total, ...lookalikes(td)].filter((t) => totals.has(t));
+    for (const t of tots) {
       add(h.num, t);
-      for (const n of lookalikes(h.num)) add(n, t);
+      for (const n of lookalikes(nd)) add(n, t);
     }
   }
   return out;
