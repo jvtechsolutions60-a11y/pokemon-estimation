@@ -135,9 +135,22 @@ function marketPrice(card, variant) {
     for (const k of keys) if (typeof cm[k] === 'number' && cm[k] > 0) return cm[k];
     return null;
   };
+  // The 7-day average of real sales follows the market better than Cardmarket's
+  // "trend", which lags a lot on new cards whose price moves fast.
   return reverse
-    ? pick('trend-holo', 'avg30-holo', 'avg-holo', 'trend', 'avg30', 'avg')
-    : pick('trend', 'avg30', 'avg', 'trend-holo', 'avg30-holo');
+    ? pick('avg7-holo', 'trend-holo', 'avg30-holo', 'avg-holo', 'avg7', 'trend', 'avg30', 'avg')
+    : pick('avg7', 'trend', 'avg30', 'avg', 'avg7-holo', 'trend-holo', 'avg30-holo');
+}
+
+// "Tendance 31,88 € · 7 j 37,27 € · 30 j 48,65 €" for the chosen print.
+function priceDetails(card, variant) {
+  const cm = card && card.pricing && card.pricing.cardmarket;
+  if (!cm) return '';
+  const sfx = variant === 'reverse' ? '-holo' : '';
+  const parts = [['Tendance', 'trend'], ['7 j', 'avg7'], ['30 j', 'avg30']]
+    .filter(([, k]) => typeof cm[k + sfx] === 'number' && cm[k + sfx] > 0)
+    .map(([label, k]) => `${label} ${euro.format(cm[k + sfx])}`);
+  return parts.join(' · ');
 }
 
 function defaultVariant(card) {
@@ -276,6 +289,132 @@ function rankByName(cards, topText) {
   return [...cards.filter(hit), ...cards.filter((c) => !hit(c))];
 }
 
+// ---------- Visual match ----------
+//
+// Several prints can share a number (Base Set and the 30th anniversary reprint
+// of Dracaufeu 4/102): they differ by a stamp or a holo pattern, not by text.
+// We find the card in the photo, then compare it pixel by pixel with each
+// candidate's official image.
+
+const REF_W = 50;
+const REF_H = 70;
+const CMP_W = 100;
+const CMP_H = 140;
+
+function loadRemoteImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // needed to read the pixels back
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// RGB values of a region of `source`, resized to w×h.
+function samplePixels(source, sx, sy, sw, sh, w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const out = new Float32Array(w * h * 3);
+  for (let i = 0, j = 0; i < d.length; i += 4, j += 3) {
+    out[j] = d[i]; out[j + 1] = d[i + 1]; out[j + 2] = d[i + 2];
+  }
+  return out;
+}
+
+function toGray(rgb) {
+  const g = new Float32Array(rgb.length / 3);
+  for (let i = 0; i < g.length; i++) g[i] = (rgb[i * 3] + rgb[i * 3 + 1] + rgb[i * 3 + 2]) / 3;
+  return g;
+}
+
+// Zero-mean, unit-variance copy, so lighting differences don't matter.
+function standardize(values, stride = 1) {
+  const out = new Float32Array(values.length);
+  for (let c = 0; c < stride; c++) {
+    let sum = 0;
+    let sq = 0;
+    let n = 0;
+    for (let i = c; i < values.length; i += stride) { sum += values[i]; sq += values[i] * values[i]; n++; }
+    const mean = sum / n;
+    const sd = Math.sqrt(Math.max(sq / n - mean * mean, 1e-6));
+    for (let i = c; i < values.length; i += stride) out[i] = (values[i] - mean) / sd;
+  }
+  return out;
+}
+
+// Slides the reference over the photo at several sizes and returns the box
+// (in photo pixels) where it correlates best.
+function locateCard(photo, ref) {
+  const refZ = standardize(toGray(samplePixels(ref, 0, 0, ref.naturalWidth, ref.naturalHeight, REF_W, REF_H)));
+  let best = { score: -Infinity };
+  for (let frac = 0.55; frac <= 1.001; frac += 0.05) {
+    // Photo resized so that a card filling `frac` of its height is REF_H tall.
+    const ph = Math.round(REF_H / frac);
+    const pw = Math.round(photo.naturalWidth * ph / photo.naturalHeight);
+    if (pw < REF_W) continue;
+    const gray = toGray(samplePixels(photo, 0, 0, photo.naturalWidth, photo.naturalHeight, pw, ph));
+    for (let y = 0; y + REF_H <= ph; y++) {
+      for (let x = 0; x + REF_W <= pw; x++) {
+        let sum = 0;
+        let sq = 0;
+        let dot = 0;
+        for (let r = 0; r < REF_H; r++) {
+          const row = (y + r) * pw + x;
+          const refRow = r * REF_W;
+          for (let c = 0; c < REF_W; c++) {
+            const v = gray[row + c];
+            sum += v; sq += v * v; dot += v * refZ[refRow + c];
+          }
+        }
+        const n = REF_W * REF_H;
+        const sd = Math.sqrt(Math.max(sq / n - (sum / n) ** 2, 1e-6));
+        const score = dot / (n * sd); // refZ has zero mean, so this is the correlation
+        if (score > best.score) {
+          const k = photo.naturalHeight / ph;
+          best = { score, x: x * k, y: y * k, w: REF_W * k, h: REF_H * k };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// Mean colour difference between the card found in the photo and a reference.
+function visualDistance(photoZ, ref) {
+  const refZ = standardize(samplePixels(ref, 0, 0, ref.naturalWidth, ref.naturalHeight, CMP_W, CMP_H), 3);
+  let diff = 0;
+  for (let i = 0; i < refZ.length; i++) diff += Math.abs(refZ[i] - photoZ[i]);
+  return diff / refZ.length;
+}
+
+// Sorts cards by how close their official image is to the photo. Returns the
+// cards unchanged when images can't be compared (no image, or no CORS).
+async function rankByImage(cards, photo) {
+  const withImage = cards.filter((c) => c.image).slice(0, 8);
+  if (withImage.length < 2) return { cards, best: null };
+  const refs = await Promise.all(withImage.map((c) => loadRemoteImage(`${c.image}/low.webp`).catch(() => null)));
+  try {
+    const first = refs.find(Boolean);
+    if (!first) return { cards, best: null };
+    const box = locateCard(photo, first);
+    const photoZ = standardize(samplePixels(photo, box.x, box.y, box.w, box.h, CMP_W, CMP_H), 3);
+    const scored = withImage.map((card, i) => ({ card, d: refs[i] ? visualDistance(photoZ, refs[i]) : Infinity }));
+    scored.sort((a, b) => a.d - b.d);
+    const ranked = scored.map((x) => x.card);
+    const rest = cards.filter((c) => !ranked.includes(c));
+    // Only claim a match when it clearly beats the runner-up.
+    const clear = scored.length > 1 && scored[1].d - scored[0].d > 0.02;
+    return { cards: [...ranked, ...rest], best: clear ? scored[0].card.id : null };
+  } catch {
+    return { cards, best: null }; // tainted canvas or decoding error
+  }
+}
+
 // ---------- UI: search ----------
 
 function setStatus(msg) {
@@ -294,21 +433,31 @@ function cardmarketUrl(card) {
   return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
 }
 
-function renderResults(cards) {
+function renderResults(cards, bestId = null) {
   const box = $('results');
   box.innerHTML = '';
   if (!cards.length) {
     box.innerHTML = '<p class="muted">Aucune carte trouvée. Corrige le numéro ou cherche par nom.</p>';
     return;
   }
-  if (cards.length > 1) {
+  if (cards.length > 1 && !bestId) {
     const hint = document.createElement('p');
     hint.className = 'muted hint';
     hint.textContent = 'Plusieurs cartes portent ce numéro : compare les logos et tampons '
       + '(ex. Pikachu « 30 » pour les 30 ans) et choisis la tienne.';
     box.appendChild(hint);
   }
-  for (const card of cards) box.appendChild(resultCard(card));
+  for (const card of cards) {
+    const el = resultCard(card);
+    if (card.id === bestId) {
+      el.classList.add('best');
+      const badge = document.createElement('div');
+      badge.className = 'badge';
+      badge.textContent = '✓ Correspond à ta photo';
+      el.prepend(badge);
+    }
+    box.appendChild(el);
+  }
 }
 
 function resultCard(card) {
@@ -322,6 +471,7 @@ function resultCard(card) {
     <div class="muted small"></div>
     <select class="variant"></select>
     <div class="price"></div>
+    <div class="details muted small"></div>
     <a class="cm small" target="_blank" rel="noopener">Voir sur Cardmarket</a>
     <button type="button">Ajouter</button>`;
   el.querySelector('.title').textContent = card.name;
@@ -341,6 +491,7 @@ function resultCard(card) {
   const refresh = () => {
     const p = full ? marketPrice(full, select.value) : null;
     priceEl.textContent = full ? (p === null ? 'Prix inconnu' : `≈ ${euro.format(p)}`) : '…';
+    el.querySelector('.details').textContent = full ? priceDetails(full, select.value) : '';
   };
   const ensureFull = async () => {
     if (!full) {
@@ -362,10 +513,16 @@ function resultCard(card) {
   return el;
 }
 
-async function searchNumber(num, total, topText = '') {
+async function searchNumber(num, total, topText = '', photo = null) {
   $('results').innerHTML = '<p class="muted">Recherche…</p>';
   try {
-    renderResults(rankByName(await findByNumber(lang(), num, total), topText));
+    let cards = rankByName(await findByNumber(lang(), num, total), topText);
+    let best = null;
+    if (photo && cards.length > 1) {
+      $('results').innerHTML = '<p class="muted">Comparaison avec les images officielles…</p>';
+      ({ cards, best } = await rankByImage(cards, photo));
+    }
+    renderResults(cards, best);
   } catch (e) {
     $('results').innerHTML = `<p class="muted">Erreur : ${e.message}</p>`;
   }
@@ -400,7 +557,7 @@ $('photo').addEventListener('change', async (ev) => {
     $('num').value = hit.num;
     $('total').value = hit.total;
     setStatus(`Numéro lu : ${hit.num}/${hit.total}${langLabel}. Corrige si besoin.`);
-    await searchNumber(hit.num, hit.total, text.top);
+    await searchNumber(hit.num, hit.total, text.top, img);
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
   } finally {
