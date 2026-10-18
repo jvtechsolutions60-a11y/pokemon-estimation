@@ -323,3 +323,15 @@ label.price-edit { flex-direction: row; align-items: center; font-weight: 600; }
   .brand span:last-child { font-size: 1rem; }
   .toolbar-actions button { padding: 8px 12px; font-size: .9rem; }
 }
+
+/* ---------- Legal page ---------- */
+body.doc { padding-bottom: 0; }
+.legal { max-width: 760px; margin: 0 auto; }
+.legal h1 { margin-top: 8px; }
+.legal h1 + .lead, .legal .lead { font-size: 1.05rem; }
+.legal h2 { font-size: 1.05rem; margin: 22px 0 6px; }
+.legal ul { padding-left: 20px; }
+.legal li { margin: 4px 0; }
+.legal #mentions { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--border); }
+.todo { background: #fff3c4; color: #6b4e00; padding: 0 4px; border-radius: 4px; }
+.footer p { margin: 4px 0; }

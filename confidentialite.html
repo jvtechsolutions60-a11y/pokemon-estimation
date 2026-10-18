@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Confidentialité et mentions légales · CoteCartes</title>
+  <meta name="theme-color" content="#e3350d">
+  <link rel="stylesheet" href="style.css?v=202610181545">
+</head>
+<body class="doc">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="./" aria-label="Retour à CoteCartes">
+        <span class="ball" aria-hidden="true"></span>
+        <span>Cote<b>Cartes</b></span>
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <article class="panel legal">
+      <h1>Confidentialité</h1>
+      <p class="lead">En bref : CoteCartes ne te demande ni nom, ni email, ni adresse, ni mot de passe. Pas de cookie publicitaire,
+        pas de mesure d'audience, pas de pistage. Tes photos ne quittent jamais ton appareil.</p>
+
+      <h2>Ce qui reste sur ton appareil</h2>
+      <ul>
+        <li><strong>Les photos de cartes</strong> sont lues directement dans ton navigateur. Elles ne sont envoyées nulle part.</li>
+        <li><strong>Ta collection</strong> (cartes, état, quantités, prix) est enregistrée dans le stockage local de ton navigateur.
+          C'est nécessaire au fonctionnement que tu demandes, il n'y a donc pas de bandeau de consentement.
+          Le bouton « Vider » l'efface.</li>
+      </ul>
+
+      <h2>Le compte (facultatif)</h2>
+      <ul>
+        <li>Ton compte est un code secret aléatoire créé sur ton appareil. Nous ne savons pas à qui il appartient.</li>
+        <li>Ta collection est chiffrée sur ton appareil (AES-256) avant d'être envoyée. Le serveur ne stocke qu'un identifiant
+          aléatoire, une empreinte du jeton d'accès et ce bloc chiffré : il ne peut pas lire ta collection.</li>
+        <li>Le serveur ne tient pas de journal des connexions et ne conserve pas d'adresse IP.</li>
+        <li>« Supprimer mon compte » efface définitivement tes données du serveur. Sans action de ta part, elles sont gardées
+          tant que le compte existe.</li>
+        <li>Si tu perds ton code, personne ne peut récupérer ta collection, pas même nous.</li>
+      </ul>
+
+      <h2>Services tiers</h2>
+      <p>Pour fonctionner, la page contacte quelques services. Comme pour tout site web, ils reçoivent techniquement ton adresse IP
+        au moment de la requête :</p>
+      <ul>
+        <li><strong>GitHub Pages</strong> (GitHub, Inc., États-Unis) héberge le site.</li>
+        <li><strong>TCGdex</strong> fournit les informations, les images et les prix des cartes.</li>
+        <li><strong>jsDelivr</strong> fournit le moteur de lecture des numéros (Tesseract.js).</li>
+        <li><strong>Cloudflare</strong> (Cloudflare, Inc., États-Unis) héberge le serveur des comptes, seulement si tu en crées un.</li>
+      </ul>
+      <p>Ces services ne reçoivent ni tes photos, ni le contenu de ta collection, ni ton code secret.
+        Le lien « Voir sur Cardmarket » t'emmène sur Cardmarket, qui applique sa propre politique.</p>
+
+      <h2>Tes droits</h2>
+      <p>Tu peux à tout moment exporter ta collection (bouton « Exporter CSV »), la modifier, la vider ou supprimer ton compte, directement dans le site.
+        Comme nous ne pouvons pas relier un compte à une personne, ces boutons sont le moyen le plus sûr d'exercer tes droits (RGPD).
+        Pour toute question : <span class="todo">[adresse email de contact à compléter]</span>.
+        Tu peux aussi saisir la <a href="https://www.cnil.fr/fr/plaintes" rel="noopener">CNIL</a>.</p>
+
+      <h1 id="mentions">Mentions légales</h1>
+      <h2>Éditeur</h2>
+      <p>JVTECH Solutions<br>
+        <span class="todo">[forme juridique, adresse, SIREN, directeur de la publication, email à compléter]</span></p>
+      <h2>Hébergement</h2>
+      <p>Site : GitHub, Inc., 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, États-Unis.<br>
+        Serveur des comptes : Cloudflare, Inc., 101 Townsend Street, San Francisco, CA 94107, États-Unis.</p>
+      <h2>Propriété intellectuelle</h2>
+      <p>Site non officiel, sans lien avec Nintendo, The Pokémon Company, Creatures, Game Freak ou Cardmarket.
+        Pokémon et les noms associés sont des marques de leurs propriétaires respectifs. Les images de cartes proviennent de TCGdex.
+        Les prix sont indicatifs et ne constituent pas une offre d'achat ou de vente.</p>
+
+      <p class="muted small">Dernière mise à jour : 18 octobre 2026.</p>
+      <p><a class="btn" href="./">← Retour au site</a></p>
+    </article>
+  </main>
+</body>
+</html>

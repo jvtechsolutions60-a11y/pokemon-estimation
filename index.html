@@ -2,6 +2,8 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://api.tcgdex.net https://assets.tcgdex.net https://cdn.jsdelivr.net https://pokemon-estimation-sync.jvtechsolutions60.workers.dev; img-src 'self' data: blob: https://assets.tcgdex.net; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CoteCartes · Estime ta collection Pokémon</title>
   <meta name="description" content="Prends tes cartes Pokémon en photo ou coche-les par extension et découvre la valeur de ta collection avec les prix Cardmarket. Gratuit, sans inscription.">
@@ -10,7 +12,7 @@
   <meta property="og:type" content="website">
   <meta name="theme-color" content="#e3350d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3Cpath d='M2 16a14 14 0 0 1 28 0z' fill='%23e3350d' stroke='%231d2130' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=202610181530">
+  <link rel="stylesheet" href="style.css?v=202610181545">
 </head>
 <body>
   <header class="topbar">
@@ -214,6 +216,7 @@
   <footer class="footer">
     <p>Site non officiel, sans lien avec Nintendo, The Pokémon Company, Creatures, Game Freak ou Cardmarket.
       Prix indicatifs. Données et images : <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a>.</p>
+    <p><a href="confidentialite.html">Confidentialité et mentions légales</a></p>
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -244,8 +247,8 @@
     </form>
   </dialog>
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-  <script src="sync.js?v=202610181530"></script>
-  <script src="app.js?v=202610181530"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
+  <script src="sync.js?v=202610181545"></script>
+  <script src="app.js?v=202610181545"></script>
 </body>
 </html>

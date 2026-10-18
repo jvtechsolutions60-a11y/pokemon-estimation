@@ -26,6 +26,20 @@ const VARIANTS = {
 const $ = (id) => document.getElementById(id);
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
+// Card data comes from a third-party API (and synced vaults), so only image
+// URLs on the TCGdex asset host ever reach the page's HTML.
+const IMAGE_RE = /^https:\/\/assets\.tcgdex\.net\/[\w./-]+$/;
+function safeImage(url) {
+  return typeof url === 'string' && IMAGE_RE.test(url) ? url : '';
+}
+
+function errorLine(message) {
+  const p = document.createElement('p');
+  p.className = 'muted';
+  p.textContent = `Erreur : ${message}`;
+  return p;
+}
+
 // ---------- Storage ----------
 
 function safeGet(key) {
@@ -36,12 +50,39 @@ function safeSet(key, value) {
 }
 
 let collection = [];
-try { collection = JSON.parse(safeGet(STORE_KEY)) || []; } catch { collection = []; }
-// Older entries kept the Cardmarket date in priceDate.
-for (const item of collection) {
-  if (!item.marketDate && item.priceDate && typeof item.manualPrice !== 'number') item.marketDate = item.priceDate;
-  delete item.priceDate;
+// Keeps only well-formed entries with the expected types, whatever the source
+// (this device, an old version of the app or a synced vault).
+function sanitizeCollection(list) {
+  if (!Array.isArray(list)) return [];
+  const str = (v) => (typeof v === 'string' ? v.slice(0, 200) : '');
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  return list.filter((i) => i && typeof i === 'object' && typeof i.id === 'string').map((i) => {
+    const item = {
+      id: str(i.id),
+      lang: /^[a-z]{2}$/.test(i.lang) ? i.lang : 'fr',
+      name: str(i.name),
+      set: str(i.set),
+      number: str(String(i.number ?? '')),
+      image: safeImage(i.image),
+      variant: Object.hasOwn(VARIANTS, i.variant) ? i.variant : 'normal',
+      condition: Object.hasOwn(CONDITIONS, i.condition) ? i.condition : 'NM',
+      qty: Math.min(9999, Math.max(1, parseInt(i.qty, 10) || 1)),
+    };
+    const market = num(i.marketPrice);
+    if (market !== undefined) item.marketPrice = market;
+    // Older entries kept the Cardmarket date in priceDate.
+    const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
+    if (date && !Number.isNaN(Date.parse(date))) item.marketDate = date;
+    const manual = num(i.manualPrice);
+    if (manual !== undefined) {
+      item.manualPrice = manual;
+      if (i.priceSource) item.priceSource = str(i.priceSource);
+    }
+    return item;
+  });
 }
+
+try { collection = sanitizeCollection(JSON.parse(safeGet(STORE_KEY))); } catch { collection = []; }
 
 function saveCollection({ fromServer = false } = {}) {
   safeSet(STORE_KEY, JSON.stringify(collection));
@@ -491,7 +532,7 @@ function renderResults(cards, bestId = null, byNumber = false) {
 function resultCard(card) {
   const el = document.createElement('div');
   el.className = 'card';
-  const img = card.image ? `${card.image}/low.webp` : '';
+  const img = card.image ? safeImage(`${card.image}/low.webp`) : '';
   const setName = card.set ? card.set.name : '';
   el.innerHTML = `
     ${img ? `<img loading="lazy" src="${img}" alt="">` : ''}
@@ -554,7 +595,7 @@ async function searchNumber(num, total, topText = '', photo = null) {
     }
     renderResults(cards, best, true);
   } catch (e) {
-    $('results').innerHTML = `<p class="muted">Erreur : ${e.message}</p>`;
+    $('results').replaceChildren(errorLine(e.message));
   }
 }
 
@@ -563,7 +604,7 @@ async function searchName(name) {
   try {
     renderResults(await findByName(lang(), name));
   } catch (e) {
-    $('results').innerHTML = `<p class="muted">Erreur : ${e.message}</p>`;
+    $('results').replaceChildren(errorLine(e.message));
   }
 }
 
@@ -579,7 +620,8 @@ $('photo').addEventListener('change', async (ev) => {
     const text = await readCardText(img).catch(() => ({ top: '', all: '' }));
     const detected = detectLanguage(text.all);
     if (detected) $('lang').value = detected;
-    const langLabel = detected ? ` · langue détectée : ${$('lang').selectedOptions[0].text.toLowerCase()}` : '';
+    const LANG_NAMES = { fr: 'français', en: 'anglais', de: 'allemand', it: 'italien', es: 'espagnol', pt: 'portugais' };
+    const langLabel = detected ? ` · langue détectée : ${LANG_NAMES[detected] || detected}` : '';
     if (!hit) {
       setStatus(`Numéro illisible${langLabel}. Saisis-le ci-dessous (ex. 4 / 102) ou cherche par nom.`);
       return;
@@ -671,7 +713,7 @@ function renderBrowse() {
     const el = document.createElement('label');
     el.className = `tick${item ? ' owned' : ''}`;
     el.innerHTML = `
-      ${c.image ? `<img loading="lazy" src="${c.image}/low.webp" alt="">` : '<div class="noimg"></div>'}
+      ${c.image && safeImage(`${c.image}/low.webp`) ? `<img loading="lazy" src="${safeImage(`${c.image}/low.webp`)}" alt="">` : '<div class="noimg"></div>'}
       <span class="tick-row"><input type="checkbox"> <span class="tick-name"></span></span>
       <span class="muted small tick-num"></span>
       <select class="tick-cond"></select>`;
@@ -789,7 +831,7 @@ function renderCollection() {
     const el = document.createElement('article');
     el.className = 'item';
     el.innerHTML = `
-      ${item.image ? `<img class="item-img" loading="lazy" src="${item.image}" alt="">` : '<div class="item-img"></div>'}
+      ${safeImage(item.image) ? `<img class="item-img" loading="lazy" src="${safeImage(item.image)}" alt="">` : '<div class="item-img"></div>'}
       <div class="item-head">
         <div class="item-name"></div>
         <div class="item-meta"></div>
@@ -1034,7 +1076,9 @@ $('refresh').addEventListener('click', async () => {
 });
 
 function csvCell(v) {
-  const s = String(v ?? '');
+  let s = String(v ?? '');
+  // Stop spreadsheets from running a cell as a formula.
+  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d/.test(s)) s = `'${s}`;
   return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -1079,7 +1123,7 @@ function showAccount(view) {
 
 Sync.init({
   onRemoteCollection(remote, message) {
-    collection = Array.isArray(remote) ? remote : [];
+    collection = sanitizeCollection(remote);
     saveCollection({ fromServer: true });
     renderCollection();
     if (message) accMsg(message);
