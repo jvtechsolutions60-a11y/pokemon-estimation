@@ -115,12 +115,14 @@ function displayNumber(card) {
 function marketPrice(card, variant) {
   const cm = card && card.pricing && card.pricing.cardmarket;
   if (!cm) return null;
-  const foil = variant === 'holo' || variant === 'reverse';
+  // Cardmarket has one product per card: its main price covers the normal or
+  // holo print, and the "-holo" fields are the reverse holo (foil) version.
+  const reverse = variant === 'reverse';
   const pick = (...keys) => {
     for (const k of keys) if (typeof cm[k] === 'number' && cm[k] > 0) return cm[k];
     return null;
   };
-  return foil
+  return reverse
     ? pick('trend-holo', 'avg30-holo', 'avg-holo', 'trend', 'avg30', 'avg')
     : pick('trend', 'avg30', 'avg', 'trend-holo', 'avg30-holo');
 }
