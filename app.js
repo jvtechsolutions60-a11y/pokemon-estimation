@@ -76,7 +76,7 @@ function sanitizeCollection(list) {
     const market = num(i.marketPrice);
     if (market !== undefined) item.marketPrice = market;
     if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
-    if (Number.isInteger(i.cmId) && i.cmId > 0) item.cmId = i.cmId;
+    if (i.nameEn) item.nameEn = str(i.nameEn);
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
     if (date && !Number.isNaN(Date.parse(date))) item.marketDate = date;
@@ -227,8 +227,6 @@ function defaultVariant(card) {
 // different snapshots. Only take a price that is newer than the one we have,
 // so the value stays put until Cardmarket really publishes a new one.
 function applyMarket(item, card, { force = false } = {}) {
-  const cmId = cardmarketProductId(card);
-  if (cmId) item.cmId = cmId;
   const cm = card && card.pricing && card.pricing.cardmarket;
   const updated = cm && cm.updated ? Date.parse(cm.updated) : NaN;
   const known = item.marketDate ? Date.parse(item.marketDate) : NaN;
@@ -526,21 +524,22 @@ function lang() {
 // Cardmarket language ids, used to open the listing filtered on the card's language.
 const CARDMARKET_LANG = { en: 1, fr: 2, de: 3, es: 4, it: 5, pt: 8 };
 
-// TCGdex prices carry Cardmarket's product id: link straight to that card's
-// page (filtered on the card's language), or fall back to a name search.
-function cardmarketProductId(card) {
-  const id = card && card.pricing && card.pricing.cardmarket && card.pricing.cardmarket.idProduct;
-  return Number.isInteger(id) && id > 0 ? id : null;
+// Cardmarket lists Pokémon cards under their English name only, and its
+// product-id links are not dependable, so the link searches the English name:
+// the result is the card's few printings, with the right edition among them.
+const englishNames = new Map();
+
+async function englishName(id, name, cardLang) {
+  if (cardLang === 'en') return name;
+  if (!englishNames.has(id)) {
+    englishNames.set(id, getCard('en', id).then((c) => (c && c.name) || null).catch(() => null));
+  }
+  return englishNames.get(id);
 }
 
-function cardmarketLink(productId, name, cardLang) {
+function cardmarketLink(name, cardLang) {
   const language = CARDMARKET_LANG[cardLang] || 2;
-  if (productId) return `https://www.cardmarket.com/fr/Pokemon/Products?${new URLSearchParams({ idProduct: productId, language })}`;
   return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${new URLSearchParams({ searchString: name, language })}`;
-}
-
-function cardmarketUrl(card) {
-  return cardmarketLink(cardmarketProductId(card), card.name, lang());
 }
 
 function renderResults(cards, bestId = null, byNumber = false, others = []) {
@@ -597,7 +596,10 @@ function resultCard(card) {
     <a class="cm small" target="_blank" rel="noopener">Voir sur Cardmarket</a>
     <button type="button">Ajouter</button>`;
   el.querySelector('.title').textContent = card.name;
-  el.querySelector('.cm').href = cardmarketUrl(card);
+  const cm = el.querySelector('.cm');
+  cm.href = cardmarketLink(card.name, lang());
+  const cardLang = lang();
+  englishName(card.id, card.name, cardLang).then((en) => { if (en) cm.href = cardmarketLink(en, cardLang); });
   el.querySelector('.muted').textContent = card.set && card.set.cardCount ? `${setName} · ${displayNumber(card)}` : `n° ${card.localId}`;
 
   const select = el.querySelector('.variant');
@@ -1052,7 +1054,12 @@ function addToCollection(card, variant, condition = 'NM') {
       condition,
       qty: 1,
     });
-    applyMarket(collection[collection.length - 1], card, { force: true });
+    const item = collection[collection.length - 1];
+    applyMarket(item, card, { force: true });
+    const cardLang = lang();
+    englishName(card.id, card.name, cardLang).then((en) => {
+      if (en && en !== item.name && cardLang !== 'en') { item.nameEn = en; saveCollection(); }
+    });
   }
   saveCollection();
   renderCollection();
@@ -1410,7 +1417,15 @@ function openCardmarketDialog(item) {
   cmItem = item;
   cmValue = null;
   $('cmCard').textContent = `${item.name} · ${item.set} · ${item.number} · ${item.lang.toUpperCase()}`;
-  $('cmLink').href = cardmarketLink(item.cmId, item.name, item.lang);
+  $('cmLink').href = cardmarketLink(item.nameEn || item.name, item.lang);
+  if (!item.nameEn) {
+    const current = item;
+    englishName(item.id, item.name, item.lang).then((en) => {
+      if (!en || cmItem !== current) return;
+      $('cmLink').href = cardmarketLink(en, current.lang);
+      if (en !== current.name) { current.nameEn = en; saveCollection(); }
+    });
+  }
   $('cmText').value = '';
   $('cmResult').textContent = '';
   $('cmApply').disabled = true;
