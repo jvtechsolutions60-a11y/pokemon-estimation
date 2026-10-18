@@ -38,8 +38,9 @@ function safeSet(key, value) {
 let collection = [];
 try { collection = JSON.parse(safeGet(STORE_KEY)) || []; } catch { collection = []; }
 
-function saveCollection() {
+function saveCollection({ fromServer = false } = {}) {
   safeSet(STORE_KEY, JSON.stringify(collection));
+  if (!fromServer) Sync.changed(collection);
 }
 
 // ---------- API ----------
@@ -481,4 +482,131 @@ $('clear').addEventListener('click', () => {
   renderCollection();
 });
 
+// ---------- UI: account ----------
+
+let pendingCode = null;
+
+function accMsg(msg) {
+  $('accMsg').textContent = msg || '';
+}
+
+function showAccount(view) {
+  for (const id of ['accDisabled', 'accOut', 'accNew', 'accIn']) $(id).hidden = id !== view;
+}
+
+Sync.init({
+  onRemoteCollection(remote, message) {
+    collection = Array.isArray(remote) ? remote : [];
+    saveCollection({ fromServer: true });
+    renderCollection();
+    if (message) accMsg(message);
+  },
+  onStateChange(state, message) {
+    if (state === 'connected' || state === 'busy') {
+      if (Sync.connected()) showAccount('accIn');
+      $('accState').textContent = message || '';
+    } else if (state === 'error') {
+      $('accState').textContent = 'Erreur';
+      accMsg(message);
+    } else if (state === 'disconnected') {
+      showAccount(Sync.enabled() ? 'accOut' : 'accDisabled');
+    }
+  },
+});
+
+$('accCreate').addEventListener('click', () => {
+  pendingCode = Sync.generateCode();
+  $('accNewCode').textContent = pendingCode;
+  $('accSaved').checked = false;
+  $('accConfirm').disabled = true;
+  accMsg('');
+  showAccount('accNew');
+});
+
+$('accSaved').addEventListener('change', (e) => {
+  $('accConfirm').disabled = !e.target.checked;
+});
+
+$('accCopy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(pendingCode);
+    accMsg('Code copié.');
+  } catch {
+    accMsg('Copie impossible : recopie le code à la main.');
+  }
+});
+
+function downloadCode(code) {
+  const text = `Estimation Pokémon - code secret du compte\n\n${code}\n\n`
+    + 'Garde ce fichier en lieu sûr. Ce code est le seul moyen de retrouver ta collection.\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  a.download = 'code-secret-pokemon-estimation.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+$('accDownload').addEventListener('click', () => downloadCode(pendingCode));
+
+$('accCancel').addEventListener('click', () => {
+  pendingCode = null;
+  showAccount('accOut');
+});
+
+$('accConfirm').addEventListener('click', async () => {
+  $('accConfirm').disabled = true;
+  try {
+    await Sync.create(pendingCode, collection);
+    pendingCode = null;
+    accMsg('Compte créé. Ta collection est chiffrée et sauvegardée.');
+  } catch (e) {
+    accMsg(e.message);
+    $('accConfirm').disabled = false;
+  }
+});
+
+$('accLogin').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const code = Sync.normalizeCode($('accCodeInput').value);
+  if (!code) {
+    accMsg('Code invalide : 20 caractères, par ex. K7QF-2M9X-PL4D-8RWA-3HNC.');
+    return;
+  }
+  if (collection.length && !confirm('La collection de ce compte va remplacer celle de cet appareil. Continuer ?')) return;
+  try {
+    accMsg('');
+    await Sync.login(code);
+    $('accCodeInput').value = '';
+  } catch (e) {
+    accMsg(e.message);
+  }
+});
+
+$('accShow').addEventListener('click', () => {
+  const el = $('accShownCode');
+  el.hidden = !el.hidden;
+  el.textContent = el.hidden ? '' : Sync.code();
+});
+
+$('accLogout').addEventListener('click', () => {
+  if (!confirm('Se déconnecter ? La collection sera effacée de cet appareil (elle reste sur ton compte).')) return;
+  Sync.logout();
+  collection = [];
+  saveCollection({ fromServer: true });
+  renderCollection();
+  $('accShownCode').hidden = true;
+  accMsg('Déconnecté.');
+});
+
+$('accDelete').addEventListener('click', async () => {
+  if (!confirm('Supprimer définitivement ton compte et la copie chiffrée de ta collection sur le serveur ?')) return;
+  try {
+    await Sync.destroy();
+    accMsg('Compte supprimé. Ta collection reste sur cet appareil.');
+  } catch (e) {
+    accMsg(e.message);
+  }
+});
+
 renderCollection();
+Sync.resume();

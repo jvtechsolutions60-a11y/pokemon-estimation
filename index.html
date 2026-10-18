@@ -58,6 +58,50 @@
       <div id="results" class="results"></div>
     </section>
 
+    <section class="panel" id="account">
+      <h2>Mon compte</h2>
+      <div id="accDisabled" hidden>
+        <p class="muted">Les comptes ne sont pas encore activés. Ta collection reste enregistrée sur cet appareil.</p>
+      </div>
+      <div id="accOut" hidden>
+        <p>Pas de nom, pas d'email, pas de mot de passe : ton compte est un <strong>code secret</strong>.
+          Ta collection est chiffrée sur ton appareil avant d'être envoyée ; le serveur ne peut pas la lire.</p>
+        <div class="row">
+          <button type="button" id="accCreate">Créer un compte</button>
+        </div>
+        <form id="accLogin" class="row">
+          <label class="grow">J'ai déjà un code
+            <input id="accCodeInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX">
+          </label>
+          <button type="submit" class="secondary">Se connecter</button>
+        </form>
+      </div>
+      <div id="accNew" hidden>
+        <p><strong>Voici ton code secret.</strong> Note-le ou télécharge-le maintenant : il ne sera plus jamais affiché
+          automatiquement et, si tu le perds, personne ne pourra récupérer ta collection.</p>
+        <p class="code" id="accNewCode"></p>
+        <div class="row">
+          <button type="button" class="secondary" id="accCopy">Copier</button>
+          <button type="button" class="secondary" id="accDownload">Télécharger le fichier de secours</button>
+        </div>
+        <label class="check"><input type="checkbox" id="accSaved"> J'ai bien noté mon code</label>
+        <div class="row">
+          <button type="button" id="accConfirm" disabled>Activer mon compte</button>
+          <button type="button" class="secondary" id="accCancel">Annuler</button>
+        </div>
+      </div>
+      <div id="accIn" hidden>
+        <p>Connecté · <span id="accState" class="muted"></span></p>
+        <div class="row">
+          <button type="button" class="secondary" id="accShow">Afficher mon code</button>
+          <button type="button" class="secondary" id="accLogout">Se déconnecter de cet appareil</button>
+          <button type="button" class="danger" id="accDelete">Supprimer mon compte</button>
+        </div>
+        <p class="code" id="accShownCode" hidden></p>
+      </div>
+      <p id="accMsg" class="status"></p>
+    </section>
+
     <section class="panel" id="collection">
       <h2>2. Ma collection</h2>
       <p class="total">Valeur estimée : <strong id="grandTotal">0,00 €</strong> <span id="count" class="muted"></span></p>
@@ -84,6 +128,7 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

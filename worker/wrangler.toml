@@ -1,0 +1,16 @@
+name = "pokemon-estimation-sync"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# No request logs: we don't want IP addresses or timings stored anywhere.
+[observability]
+enabled = false
+
+[vars]
+ALLOWED_ORIGINS = "https://jvtechsolutions60-a11y.github.io,http://localhost:8080,http://127.0.0.1:8080"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pokemon-estimation"
+database_id = "__D1_DATABASE_ID__"
