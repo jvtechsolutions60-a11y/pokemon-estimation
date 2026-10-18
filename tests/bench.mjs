@@ -88,10 +88,11 @@ async function runOne(card, mode, seed) {
       pick: res.pick ? res.pick.id : null,
       ms,
     };
-  }, { card, mode, seed });
+  }, { card, mode, seed, png });
 }
 
 const rows = [];
+images.clear();
 for (const [i, card] of sample.entries()) {
   for (const mode of ['scan', 'photo']) {
     let r;
