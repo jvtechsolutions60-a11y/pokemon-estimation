@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estimation Pokémon</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Estimation de collection Pokémon</h1>
+    <p class="sub">Photo de la carte → lecture du numéro → prix Cardmarket (€)</p>
+  </header>
+
+  <main>
+    <section class="panel" id="scan">
+      <h2>1. Identifier une carte</h2>
+
+      <div class="row">
+        <label>Langue de la carte
+          <select id="lang">
+            <option value="fr" selected>Français</option>
+            <option value="en">Anglais</option>
+            <option value="de">Allemand</option>
+            <option value="it">Italien</option>
+            <option value="es">Espagnol</option>
+            <option value="pt">Portugais</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="drop" id="drop">
+        <input type="file" id="photo" accept="image/*" capture="environment">
+        <span>📷 Prendre ou choisir une photo de la carte</span>
+      </label>
+
+      <div id="preview" class="preview" hidden>
+        <img id="previewImg" alt="Photo de la carte">
+        <canvas id="cropCanvas" title="Zone lue"></canvas>
+      </div>
+
+      <p id="ocrStatus" class="status"></p>
+
+      <form id="manual" class="row">
+        <label>Numéro
+          <input id="num" inputmode="numeric" placeholder="4" size="5">
+        </label>
+        <span class="slash">/</span>
+        <label>Total
+          <input id="total" inputmode="numeric" placeholder="102" size="5">
+        </label>
+        <label class="grow">ou nom
+          <input id="name" placeholder="Dracaufeu">
+        </label>
+        <button type="submit">Rechercher</button>
+      </form>
+
+      <div id="results" class="results"></div>
+    </section>
+
+    <section class="panel" id="collection">
+      <h2>2. Ma collection</h2>
+      <p class="total">Valeur estimée : <strong id="grandTotal">0,00 €</strong> <span id="count" class="muted"></span></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th><th>Carte</th><th>Extension</th><th>N°</th><th>Version</th><th>État</th><th>Qté</th><th>Prix unit.</th><th>Total</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <button id="refresh" type="button">Actualiser les prix</button>
+        <button id="export" type="button">Exporter en CSV</button>
+        <button id="clear" type="button" class="danger">Vider</button>
+      </div>
+      <p class="muted small">
+        Prix : tendance Cardmarket via <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a>, toutes langues confondues.
+        L'état applique une décote indicative. Le prix unitaire est modifiable à la main (cartes gradées, langue rare…).
+      </p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
