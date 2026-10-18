@@ -23,6 +23,11 @@ const VARIANTS = {
   reverse: 'Reverse',
 };
 
+// Which Cardmarket figure marketPrice() used, for the label under the price.
+const PRICE_KEY_LABELS = {
+  avg7: 'Moyenne des ventes 7 j', trend: 'Tendance Cardmarket', avg30: 'Moyenne des ventes 30 j', avg: 'Prix moyen Cardmarket',
+};
+
 const $ = (id) => document.getElementById(id);
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -70,6 +75,7 @@ function sanitizeCollection(list) {
     };
     const market = num(i.marketPrice);
     if (market !== undefined) item.marketPrice = market;
+    if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
     if (date && !Number.isNaN(Date.parse(date))) item.marketDate = date;
@@ -171,6 +177,15 @@ function displayNumber(card) {
 
 // ---------- Pricing ----------
 
+function marketPriceKey(card, variant) {
+  const cm = card && card.pricing && card.pricing.cardmarket;
+  if (!cm) return null;
+  const order = variant === 'reverse'
+    ? ['avg7-holo', 'trend-holo', 'avg30-holo', 'avg-holo', 'avg7', 'trend', 'avg30', 'avg']
+    : ['avg7', 'trend', 'avg30', 'avg', 'avg7-holo', 'trend-holo', 'avg30-holo'];
+  return order.find((k) => typeof cm[k] === 'number' && cm[k] > 0) || null;
+}
+
 function marketPrice(card, variant) {
   const cm = card && card.pricing && card.pricing.cardmarket;
   if (!cm) return null;
@@ -220,6 +235,8 @@ function applyMarket(item, card, { force = false } = {}) {
   if (price === null && !force) return false;
   item.marketPrice = price;
   item.marketDate = cm && cm.updated ? cm.updated : null;
+  const key = marketPriceKey(card, item.variant);
+  if (key) item.marketKey = key.replace('-holo', ''); else delete item.marketKey;
   return true;
 }
 
@@ -227,7 +244,7 @@ function priceSourceLabel(item) {
   if (typeof item.manualPrice === 'number') return item.priceSource || 'Prix saisi à la main';
   if (typeof item.marketPrice !== 'number') return 'Pas de prix';
   const day = item.marketDate ? ` au ${new Date(item.marketDate).toLocaleDateString('fr-FR')}` : '';
-  return `Moyenne des ventes 7 j${day}`;
+  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}`;
 }
 
 function unitPrice(item) {
@@ -348,14 +365,22 @@ async function readCardText(img) {
 }
 
 // Puts first the cards whose name appears in the text read at the top of the photo.
-function rankByName(cards, topText) {
-  if (!topText) return cards;
+// Whether the card's name shows up in the text read at the top of the photo.
+// OCR often mangles symbols and suffixes ("C NIV.X", "ex", "V"), so one long
+// enough word of the name is enough.
+function nameOnPhoto(card, topText) {
   const t = fold(topText).replace(/[^a-z0-9]/g, '');
-  const hit = (c) => {
-    const n = fold(c.name).replace(/[^a-z0-9]/g, '');
-    return n.length >= 3 && t.includes(n);
-  };
-  return [...cards.filter(hit), ...cards.filter((c) => !hit(c))];
+  if (!t) return false;
+  const full = fold(card.name).replace(/[^a-z0-9]/g, '');
+  if (full.length >= 3 && t.includes(full)) return true;
+  return fold(card.name).split(/[^a-z0-9]+/).some((w) => w.length >= 5 && t.includes(w));
+}
+
+// Cards whose name is on the photo come first; the others are returned apart.
+function rankByName(cards, topText) {
+  const hits = cards.filter((c) => nameOnPhoto(c, topText));
+  if (!hits.length) return { cards, others: [] };
+  return { cards: hits, others: cards.filter((c) => !hits.includes(c)) };
 }
 
 // ---------- Visual match ----------
@@ -502,7 +527,7 @@ function cardmarketUrl(card) {
   return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
 }
 
-function renderResults(cards, bestId = null, byNumber = false) {
+function renderResults(cards, bestId = null, byNumber = false, others = []) {
   const box = $('results');
   box.innerHTML = '';
   if (!cards.length) {
@@ -512,8 +537,8 @@ function renderResults(cards, bestId = null, byNumber = false) {
   if (byNumber && cards.length > 1 && !bestId) {
     const hint = document.createElement('p');
     hint.className = 'muted hint';
-    hint.textContent = 'Plusieurs cartes portent ce numéro : compare les logos et tampons '
-      + '(ex. Pikachu « 30 » pour les 30 ans) et choisis la tienne.';
+    hint.textContent = 'Plusieurs éditions portent ce numéro : compare le symbole d\u2019extension et les tampons '
+      + '(Pikachu « 25 » ou « 30 » pour les rééditions anniversaire) et choisis la tienne.';
     box.appendChild(hint);
   }
   for (const card of cards) {
@@ -526,6 +551,18 @@ function renderResults(cards, bestId = null, byNumber = false) {
       el.prepend(badge);
     }
     box.appendChild(el);
+  }
+  // Same number but another name than the one read on the photo: kept out of the way.
+  if (others.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'secondary more-results';
+    more.textContent = `Voir ${others.length} autre${others.length > 1 ? 's' : ''} carte${others.length > 1 ? 's' : ''} avec ce numéro`;
+    more.addEventListener('click', () => {
+      more.remove();
+      for (const card of others) box.appendChild(resultCard(card));
+    });
+    box.appendChild(more);
   }
 }
 
@@ -587,13 +624,14 @@ function resultCard(card) {
 async function searchNumber(num, total, topText = '', photo = null) {
   $('results').innerHTML = '<p class="muted">Recherche…</p>';
   try {
-    let cards = rankByName(await findByNumber(lang(), num, total), topText);
+    const ranked = rankByName(await findByNumber(lang(), num, total), topText);
+    let { cards } = ranked;
     let best = null;
     if (photo && cards.length > 1) {
       $('results').innerHTML = '<p class="muted">Comparaison avec les images officielles…</p>';
       ({ cards, best } = await rankByImage(cards, photo));
     }
-    renderResults(cards, best, true);
+    renderResults(cards, best, true, ranked.others);
   } catch (e) {
     $('results').replaceChildren(errorLine(e.message));
   }
@@ -619,11 +657,12 @@ async function identifyPhoto(img, onStep = () => {}) {
   if (detected) $('lang').value = detected;
   if (!hit) return { hit, detected, cards: [], best: null, sure: false };
   onStep(hit, detected);
-  let cards = rankByName(await findByNumber(lang(), hit.num, hit.total), text.top);
+  const ranked = rankByName(await findByNumber(lang(), hit.num, hit.total), text.top);
+  let { cards } = ranked;
   let best = null;
   if (cards.length > 1) ({ cards, best } = await rankByImage(cards, img));
   const sure = cards.length === 1 || Boolean(best);
-  return { hit, detected, cards, best, sure, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
+  return { hit, detected, cards, others: ranked.others, best, sure, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
 }
 
 async function scanOne(file) {
@@ -646,7 +685,7 @@ async function scanOne(file) {
       $('manualBox').open = true;
       return;
     }
-    renderResults(res.cards, res.best, true);
+    renderResults(res.cards, res.best, true, res.others);
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
     $('results').innerHTML = '';

@@ -384,3 +384,4 @@ label.btn { flex-direction: row; cursor: pointer; font-size: 1rem; }
 /* ---------- Install ---------- */
 .install { min-height: 0; padding: 6px 12px; border-radius: 999px; background: #fff; color: var(--accent); font-size: .85rem; }
 .ios-hint { margin-top: 8px !important; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--text) !important; font-size: .88rem; }
+.results .more-results { grid-column: 1 / -1; justify-self: start; }
