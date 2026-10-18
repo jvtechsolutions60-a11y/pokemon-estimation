@@ -2,153 +2,227 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Estimation Pokémon</title>
-  <link rel="stylesheet" href="style.css?v=202610181507">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CoteCartes · Estime ta collection Pokémon</title>
+  <meta name="description" content="Prends tes cartes Pokémon en photo ou coche-les par extension et découvre la valeur de ta collection avec les prix Cardmarket. Gratuit, sans inscription.">
+  <meta property="og:title" content="CoteCartes · Estime ta collection Pokémon">
+  <meta property="og:description" content="Photo ou cases à cocher, prix Cardmarket en euros, compte anonyme et chiffré.">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#e3350d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3Cpath d='M2 16a14 14 0 0 1 28 0z' fill='%23e3350d' stroke='%231d2130' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=202610181530">
 </head>
 <body>
-  <header>
-    <h1>Estimation de collection Pokémon</h1>
-    <p class="sub">Photo de la carte → lecture du numéro → prix Cardmarket (€)</p>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#scan" aria-label="CoteCartes, accueil">
+        <span class="ball" aria-hidden="true"></span>
+        <span>Cote<b>Cartes</b></span>
+      </a>
+      <label class="lang-pick" title="Langue de tes cartes">
+        <span class="sr-only">Langue des cartes</span>
+        <select id="lang">
+          <option value="fr" selected>🇫🇷 FR</option>
+          <option value="en">🇬🇧 EN</option>
+          <option value="de">🇩🇪 DE</option>
+          <option value="it">🇮🇹 IT</option>
+          <option value="es">🇪🇸 ES</option>
+          <option value="pt">🇵🇹 PT</option>
+        </select>
+      </label>
+      <a class="worth" href="#collection" title="Voir ma collection">
+        <span class="worth-label">Ma collection</span>
+        <strong id="grandTotal">0,00 €</strong>
+        <span id="count" class="worth-count"></span>
+      </a>
+    </div>
   </header>
 
+  <nav class="tabs" aria-label="Sections">
+    <a href="#scan" data-tab="scan"><span class="tab-ico" aria-hidden="true">📷</span><span>Scanner</span></a>
+    <a href="#extensions" data-tab="extensions"><span class="tab-ico" aria-hidden="true">☑️</span><span>Extensions</span></a>
+    <a href="#collection" data-tab="collection"><span class="tab-ico" aria-hidden="true">🗂️</span><span>Collection</span><span id="tabCount" class="tab-badge" hidden></span></a>
+    <a href="#compte" data-tab="compte"><span class="tab-ico" aria-hidden="true">🔐</span><span>Compte</span></a>
+  </nav>
+
   <main>
-    <section class="panel" id="scan">
-      <h2>1. Identifier une carte</h2>
-
-      <div class="row">
-        <label>Langue de la carte
-          <select id="lang">
-            <option value="fr" selected>Français</option>
-            <option value="en">Anglais</option>
-            <option value="de">Allemand</option>
-            <option value="it">Italien</option>
-            <option value="es">Espagnol</option>
-            <option value="pt">Portugais</option>
-          </select>
-        </label>
+    <section class="view" id="view-scan" data-view="scan">
+      <div class="hero">
+        <h1>Combien vaut ta collection ?</h1>
+        <p>Prends une carte en photo : le numéro est lu automatiquement et le prix Cardmarket s'affiche.</p>
       </div>
 
-      <label class="drop" id="drop">
-        <input type="file" id="photo" accept="image/*" capture="environment">
-        <span>📷 Prendre ou choisir une photo de la carte</span>
-      </label>
+      <div class="panel">
+        <label class="drop" id="drop">
+          <input type="file" id="photo" accept="image/*" capture="environment">
+          <span class="drop-ico" aria-hidden="true">📷</span>
+          <span class="drop-title">Prendre ou choisir une photo</span>
+          <span class="drop-hint">Carte bien à plat, numéro du bas lisible</span>
+        </label>
 
-      <div id="preview" class="preview" hidden>
-        <img id="previewImg" alt="Photo de la carte">
-        <canvas id="cropCanvas" title="Zone lue"></canvas>
+        <div id="preview" class="preview" hidden>
+          <img id="previewImg" alt="Photo de la carte">
+          <div class="preview-side">
+            <span class="muted small">Zone lue</span>
+            <canvas id="cropCanvas" title="Zone lue"></canvas>
+          </div>
+        </div>
+
+        <p id="ocrStatus" class="status"></p>
+
+        <details class="manual-box" id="manualBox">
+          <summary>Saisir le numéro ou le nom à la main</summary>
+          <form id="manual" class="manual">
+            <label>Numéro
+              <input id="num" inputmode="numeric" placeholder="4">
+            </label>
+            <span class="slash">/</span>
+            <label>Total
+              <input id="total" inputmode="numeric" placeholder="102">
+            </label>
+            <label class="grow">ou nom
+              <input id="name" placeholder="Dracaufeu" enterkeyhint="search">
+            </label>
+            <button type="submit">Rechercher</button>
+          </form>
+        </details>
       </div>
-
-      <p id="ocrStatus" class="status"></p>
-
-      <form id="manual" class="row">
-        <label>Numéro
-          <input id="num" inputmode="numeric" placeholder="4" size="5">
-        </label>
-        <span class="slash">/</span>
-        <label>Total
-          <input id="total" inputmode="numeric" placeholder="102" size="5">
-        </label>
-        <label class="grow">ou nom
-          <input id="name" placeholder="Dracaufeu">
-        </label>
-        <button type="submit">Rechercher</button>
-      </form>
 
       <div id="results" class="results"></div>
     </section>
 
-    <section class="panel" id="browse">
-      <h2>Ou coche tes cartes par extension</h2>
-      <div class="row">
-        <label class="grow">Extension
-          <select id="setSelect"><option value="">Chargement des extensions…</option></select>
-        </label>
-        <label class="grow">Filtrer
-          <input id="setFilter" placeholder="Nom ou numéro">
-        </label>
-        <label class="check"><input type="checkbox" id="setOwnedOnly"> Seulement mes cartes</label>
+    <section class="view" id="view-extensions" data-view="extensions" hidden>
+      <div class="hero">
+        <h1>Coche tes cartes</h1>
+        <p>Choisis une extension et coche ce que tu possèdes. Les cartes sont ajoutées en Near Mint ; change l'état carte par carte.</p>
       </div>
-      <p id="setInfo" class="muted small"></p>
+      <div class="panel">
+        <div class="filters">
+          <label class="grow">Extension
+            <select id="setSelect"><option value="">Chargement des extensions…</option></select>
+          </label>
+          <label class="grow">Filtrer
+            <input id="setFilter" type="search" placeholder="Nom ou numéro">
+          </label>
+          <label class="check"><input type="checkbox" id="setOwnedOnly"> Seulement mes cartes</label>
+        </div>
+        <div class="progress" id="setProgress" hidden><span id="setProgressBar"></span></div>
+        <p id="setInfo" class="muted small"></p>
+      </div>
       <div id="setGrid" class="set-grid"></div>
     </section>
 
-    <section class="panel" id="account">
-      <h2>Mon compte</h2>
-      <div id="accDisabled" hidden>
-        <p class="muted">Les comptes ne sont pas encore activés. Ta collection reste enregistrée sur cet appareil.</p>
-      </div>
-      <div id="accOut" hidden>
-        <p>Pas de nom, pas d'email, pas de mot de passe : ton compte est un <strong>code secret</strong>.
-          Ta collection est chiffrée sur ton appareil avant d'être envoyée ; le serveur ne peut pas la lire.</p>
-        <div class="row">
-          <button type="button" id="accCreate">Créer un compte</button>
+    <section class="view" id="view-collection" data-view="collection" hidden>
+      <div class="summary">
+        <div class="stat stat-main">
+          <span class="stat-label">Valeur estimée</span>
+          <strong id="sumTotal">0,00 €</strong>
         </div>
-        <form id="accLogin" class="row">
-          <label class="grow">J'ai déjà un code
-            <input id="accCodeInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX">
-          </label>
-          <button type="submit" class="secondary">Se connecter</button>
-        </form>
-      </div>
-      <div id="accNew" hidden>
-        <p><strong>Voici ton code secret.</strong> Note-le ou télécharge-le maintenant : il ne sera plus jamais affiché
-          automatiquement et, si tu le perds, personne ne pourra récupérer ta collection.</p>
-        <p class="code" id="accNewCode"></p>
-        <div class="row">
-          <button type="button" class="secondary" id="accCopy">Copier</button>
-          <button type="button" class="secondary" id="accDownload">Télécharger le fichier de secours</button>
+        <div class="stat">
+          <span class="stat-label">Cartes</span>
+          <strong id="sumCount">0</strong>
         </div>
-        <label class="check"><input type="checkbox" id="accSaved"> J'ai bien noté mon code</label>
-        <div class="row">
-          <button type="button" id="accConfirm" disabled>Activer mon compte</button>
-          <button type="button" class="secondary" id="accCancel">Annuler</button>
+        <div class="stat">
+          <span class="stat-label">Plus chère</span>
+          <strong id="sumTop">–</strong>
+          <small id="sumTopName"></small>
         </div>
       </div>
-      <div id="accIn" hidden>
-        <p>Connecté · <span id="accState" class="muted"></span></p>
-        <div class="row">
-          <button type="button" class="secondary" id="accShow">Afficher mon code</button>
-          <button type="button" class="secondary" id="accLogout">Se déconnecter de cet appareil</button>
-          <button type="button" class="danger" id="accDelete">Supprimer mon compte</button>
-        </div>
-        <p class="code" id="accShownCode" hidden></p>
-      </div>
-      <p id="accMsg" class="status"></p>
-    </section>
 
-    <section class="panel" id="collection">
-      <h2>2. Ma collection</h2>
-      <p class="total">Valeur estimée : <strong id="grandTotal">0,00 €</strong> <span id="count" class="muted"></span></p>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th></th><th>Carte</th><th>Extension</th><th>N°</th><th>Version</th><th>État</th><th>Qté</th><th>Prix unit.</th><th>Total</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-      <div class="row">
-        <button id="refresh" type="button">Actualiser les prix</button>
-        <button id="export" type="button">Exporter en CSV</button>
-        <button id="clear" type="button" class="danger">Vider</button>
+      <div class="panel toolbar">
+        <label class="grow">Rechercher
+          <input id="colFilter" type="search" placeholder="Nom, extension, numéro">
+        </label>
+        <label>Trier par
+          <select id="colSort">
+            <option value="value">Valeur</option>
+            <option value="name">Nom</option>
+            <option value="set">Extension</option>
+            <option value="added">Ajout</option>
+          </select>
+        </label>
+        <div class="toolbar-actions">
+          <button id="refresh" type="button">↻ Actualiser les prix</button>
+          <button id="export" type="button" class="secondary">Exporter CSV</button>
+          <button id="clear" type="button" class="ghost-danger">Vider</button>
+        </div>
       </div>
       <p id="refreshInfo" class="status small"></p>
-      <p class="muted small">
+
+      <div id="rows" class="items"></div>
+
+      <p class="muted small note">
         Prix : moyenne des ventes Cardmarket sur 7 jours via <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a>, toutes langues confondues.
-        « Actualiser » ne change un prix que si Cardmarket a publié de nouvelles ventes ; un prix venant du bouton « € CM » ou saisi à la main n'est jamais remplacé.
-        L'état applique une décote indicative. Le prix unitaire est modifiable à la main (cartes gradées, langue rare…).
+        « Actualiser » ne change un prix que si Cardmarket a publié de nouvelles ventes. Un prix venant de « € Cardmarket » ou saisi à la main n'est jamais remplacé.
+        L'état applique une décote indicative.
       </p>
     </section>
+
+    <section class="view" id="view-compte" data-view="compte" hidden>
+      <div class="hero">
+        <h1>Ton compte</h1>
+        <p>Retrouve ta collection sur tous tes appareils, sans donner ni nom, ni email, ni mot de passe.</p>
+      </div>
+      <div class="panel" id="account">
+        <div id="accDisabled" hidden>
+          <p class="muted">Les comptes ne sont pas encore activés. Ta collection reste enregistrée sur cet appareil.</p>
+        </div>
+        <div id="accOut" hidden>
+          <ul class="perks">
+            <li><span aria-hidden="true">🔑</span> <span>Ton compte est un <strong>code secret</strong> de 20 caractères.</span></li>
+            <li><span aria-hidden="true">🔒</span> <span>Ta collection est chiffrée sur ton appareil : le serveur ne peut pas la lire.</span></li>
+            <li><span aria-hidden="true">🙈</span> <span>Aucune donnée personnelle : rien à pirater qui te concerne.</span></li>
+          </ul>
+          <div class="row">
+            <button type="button" id="accCreate">Créer un compte</button>
+          </div>
+          <form id="accLogin" class="row">
+            <label class="grow">J'ai déjà un code
+              <input id="accCodeInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX">
+            </label>
+            <button type="submit" class="secondary">Se connecter</button>
+          </form>
+        </div>
+        <div id="accNew" hidden>
+          <p><strong>Voici ton code secret.</strong> Note-le ou télécharge-le maintenant : il ne sera plus jamais affiché
+            automatiquement et, si tu le perds, personne ne pourra récupérer ta collection.</p>
+          <p class="code" id="accNewCode"></p>
+          <div class="row">
+            <button type="button" class="secondary" id="accCopy">Copier</button>
+            <button type="button" class="secondary" id="accDownload">Télécharger le fichier de secours</button>
+          </div>
+          <label class="check"><input type="checkbox" id="accSaved"> J'ai bien noté mon code</label>
+          <div class="row">
+            <button type="button" id="accConfirm" disabled>Activer mon compte</button>
+            <button type="button" class="secondary" id="accCancel">Annuler</button>
+          </div>
+        </div>
+        <div id="accIn" hidden>
+          <p class="connected"><span class="dot" aria-hidden="true"></span> Connecté · <span id="accState" class="muted"></span></p>
+          <div class="row">
+            <button type="button" class="secondary" id="accShow">Afficher mon code</button>
+            <button type="button" class="secondary" id="accLogout">Se déconnecter de cet appareil</button>
+            <button type="button" class="ghost-danger" id="accDelete">Supprimer mon compte</button>
+          </div>
+          <p class="code" id="accShownCode" hidden></p>
+        </div>
+        <p id="accMsg" class="status"></p>
+      </div>
+    </section>
   </main>
+
+  <footer class="footer">
+    <p>Site non officiel, sans lien avec Nintendo, The Pokémon Company, Creatures, Game Freak ou Cardmarket.
+      Prix indicatifs. Données et images : <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a>.</p>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <dialog id="cmDialog">
     <form method="dialog" class="cm-form">
       <h3>Prix depuis Cardmarket</h3>
       <p class="muted small" id="cmCard"></p>
-      <ol class="small">
+      <ol class="small steps">
         <li><a id="cmLink" target="_blank" rel="noopener">Ouvre la carte sur Cardmarket</a>, filtre la langue et l'état.</li>
         <li>Sélectionne tout le texte de la page (Ctrl+A ou appui long → « Tout sélectionner »), copie-le.</li>
         <li>Colle-le ici :</li>
@@ -171,7 +245,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-  <script src="sync.js?v=202610181507"></script>
-  <script src="app.js?v=202610181507"></script>
+  <script src="sync.js?v=202610181530"></script>
+  <script src="app.js?v=202610181530"></script>
 </body>
 </html>

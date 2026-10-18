@@ -461,14 +461,14 @@ function cardmarketUrl(card) {
   return `https://www.cardmarket.com/fr/Pokemon/Products/Search?${q}`;
 }
 
-function renderResults(cards, bestId = null) {
+function renderResults(cards, bestId = null, byNumber = false) {
   const box = $('results');
   box.innerHTML = '';
   if (!cards.length) {
     box.innerHTML = '<p class="muted">Aucune carte trouvée. Corrige le numéro ou cherche par nom.</p>';
     return;
   }
-  if (cards.length > 1 && !bestId) {
+  if (byNumber && cards.length > 1 && !bestId) {
     const hint = document.createElement('p');
     hint.className = 'muted hint';
     hint.textContent = 'Plusieurs cartes portent ce numéro : compare les logos et tampons '
@@ -537,6 +537,8 @@ function resultCard(card) {
     await ensureFull();
     addToCollection(full, select.value);
     button.textContent = 'Ajoutée ✓';
+    button.classList.add('added');
+    toast(`${full.name} ajoutée à ta collection`, { label: 'Voir', href: '#collection' });
   });
   return el;
 }
@@ -550,7 +552,7 @@ async function searchNumber(num, total, topText = '', photo = null) {
       $('results').innerHTML = '<p class="muted">Comparaison avec les images officielles…</p>';
       ({ cards, best } = await rankByImage(cards, photo));
     }
-    renderResults(cards, best);
+    renderResults(cards, best, true);
   } catch (e) {
     $('results').innerHTML = `<p class="muted">Erreur : ${e.message}</p>`;
   }
@@ -636,6 +638,7 @@ async function loadSetList() {
 async function openSet(id) {
   browseCards = [];
   $('setGrid').innerHTML = '';
+  $('setProgress').hidden = true;
   if (!id) { $('setInfo').textContent = ''; return; }
   $('setInfo').textContent = 'Chargement…';
   try {
@@ -657,6 +660,8 @@ function renderBrowse() {
   const ownedOnly = $('setOwnedOnly').checked;
   const owned = browseCards.filter((c) => ownedItem(c.id)).length;
   $('setInfo').textContent = `${browseSetName} : ${owned} / ${browseCards.length} cartes cochées.`;
+  $('setProgress').hidden = false;
+  $('setProgressBar').style.width = `${(100 * owned) / browseCards.length}%`;
 
   for (const c of browseCards) {
     const item = ownedItem(c.id);
@@ -738,34 +743,85 @@ function addToCollection(card, variant, condition = 'NM') {
   renderCollection();
 }
 
+const SORTS = {
+  value: (a, b) => unitPrice(b) * b.qty - unitPrice(a) * a.qty,
+  name: (a, b) => a.name.localeCompare(b.name, 'fr'),
+  set: (a, b) => a.set.localeCompare(b.set, 'fr') || String(a.number).localeCompare(String(b.number), 'fr', { numeric: true }),
+  added: (a, b) => collection.indexOf(b) - collection.indexOf(a),
+};
+
+function emptyCollection() {
+  const el = document.createElement('div');
+  el.className = 'empty';
+  el.innerHTML = `
+    <span class="big" aria-hidden="true">🗂️</span>
+    <p>Ta collection est vide. Ajoute des cartes en photo ou en les cochant par extension.</p>
+    <div class="row">
+      <a class="btn" href="#scan">📷 Scanner une carte</a>
+      <a class="btn secondary" href="#extensions">☑️ Cocher par extension</a>
+    </div>`;
+  return el;
+}
+
 function renderCollection() {
-  const tbody = $('rows');
-  tbody.innerHTML = '';
+  const list = $('rows');
+  list.innerHTML = '';
   let total = 0;
   let count = 0;
-
-  collection.forEach((item, idx) => {
-    const unit = unitPrice(item);
-    total += unit * item.qty;
+  let top = null;
+  for (const item of collection) {
+    const value = unitPrice(item) * item.qty;
+    total += value;
     count += item.qty;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${item.image ? `<img src="${item.image}" alt="">` : ''}</td>
-      <td class="c-name"></td>
-      <td class="c-set"></td>
-      <td class="c-num"></td>
-      <td><select class="c-variant"></select></td>
-      <td><select class="c-cond"></select></td>
-      <td><input class="qty" type="number" min="1" value="${item.qty}"></td>
-      <td class="num"><input class="c-price" type="number" min="0" step="0.01" value="${unit.toFixed(2)}"><div class="muted small c-src"></div></td>
-      <td class="num">${euro.format(unit * item.qty)}</td>
-      <td><button type="button" class="link cm-open" title="Prix depuis les offres Cardmarket">€ CM</button><button type="button" class="link" title="Retirer">✕</button></td>`;
-    tr.querySelector('.c-name').textContent = item.name;
-    tr.querySelector('.c-set').textContent = item.set;
-    tr.querySelector('.c-num').textContent = item.number;
-    tr.querySelector('.c-src').textContent = priceSourceLabel(item);
+    if (!top || unitPrice(item) > unitPrice(top)) top = item;
+  }
 
-    const variantSel = tr.querySelector('.c-variant');
+  const q = fold($('colFilter').value.trim());
+  const shown = collection
+    .filter((i) => !q || fold(`${i.name} ${i.set} ${i.number}`).includes(q))
+    .sort(SORTS[$('colSort').value] || SORTS.value);
+
+  if (!collection.length) list.appendChild(emptyCollection());
+  else if (!shown.length) list.innerHTML = '<p class="muted">Aucune carte ne correspond à ta recherche.</p>';
+
+  for (const item of shown) {
+    const unit = unitPrice(item);
+    const el = document.createElement('article');
+    el.className = 'item';
+    el.innerHTML = `
+      ${item.image ? `<img class="item-img" loading="lazy" src="${item.image}" alt="">` : '<div class="item-img"></div>'}
+      <div class="item-head">
+        <div class="item-name"></div>
+        <div class="item-meta"></div>
+      </div>
+      <div class="item-total"><strong>${euro.format(unit * item.qty)}</strong>${item.qty > 1 ? `<span class="muted">${item.qty} × ${euro.format(unit)}</span>` : ''}</div>
+      <div class="item-controls">
+        <select class="c-variant" aria-label="Version"></select>
+        <select class="c-cond" aria-label="État"></select>
+        <span class="stepper" aria-label="Quantité">
+          <button type="button" class="q-minus" aria-label="Retirer un exemplaire">−</button>
+          <span class="q-val">${item.qty}</span>
+          <button type="button" class="q-plus" aria-label="Ajouter un exemplaire">+</button>
+        </span>
+        <label class="price-edit">Prix
+          <input class="c-price" type="number" inputmode="decimal" min="0" step="0.01" value="${unit.toFixed(2)}" aria-label="Prix unitaire en euros">
+        </label>
+        <span class="item-actions">
+          <button type="button" class="secondary cm-open" title="Prix depuis les offres Cardmarket">€ Cardmarket</button>
+          <button type="button" class="icon c-remove" title="Retirer de la collection" aria-label="Retirer">✕</button>
+        </span>
+        <span class="price-src"></span>
+      </div>`;
+    el.querySelector('.item-name').textContent = item.name;
+    const meta = el.querySelector('.item-meta');
+    meta.textContent = `${item.number} · ${item.set}`;
+    const tag = document.createElement('span');
+    tag.className = 'item-lang';
+    tag.textContent = (item.lang || '').toUpperCase();
+    meta.appendChild(tag);
+    el.querySelector('.price-src').textContent = priceSourceLabel(item);
+
+    const variantSel = el.querySelector('.c-variant');
     for (const [k, label] of Object.entries(VARIANTS)) variantSel.appendChild(new Option(label, k));
     variantSel.value = item.variant;
     variantSel.addEventListener('change', async () => {
@@ -775,8 +831,8 @@ function renderCollection() {
       renderCollection();
     });
 
-    const condSel = tr.querySelector('.c-cond');
-    for (const [k, c] of Object.entries(CONDITIONS)) condSel.appendChild(new Option(`${k} (${c.label})`, k));
+    const condSel = el.querySelector('.c-cond');
+    for (const [k, c] of Object.entries(CONDITIONS)) condSel.appendChild(new Option(`${k} · ${c.label}`, k));
     condSel.value = item.condition;
     condSel.addEventListener('change', () => {
       item.condition = condSel.value;
@@ -784,34 +840,101 @@ function renderCollection() {
       renderCollection();
     });
 
-    tr.querySelector('.qty').addEventListener('change', (e) => {
-      item.qty = Math.max(1, parseInt(e.target.value, 10) || 1);
+    el.querySelector('.q-minus').addEventListener('click', () => {
+      if (item.qty <= 1) return;
+      item.qty -= 1;
+      saveCollection();
+      renderCollection();
+    });
+    el.querySelector('.q-plus').addEventListener('click', () => {
+      item.qty += 1;
       saveCollection();
       renderCollection();
     });
 
-    tr.querySelector('.c-price').addEventListener('change', (e) => {
-      const v = parseFloat(e.target.value);
-      if (Number.isFinite(v) && v >= 0) item.manualPrice = v;
-      else delete item.manualPrice;
+    el.querySelector('.c-price').addEventListener('change', (e) => {
+      const v = parseFloat(String(e.target.value).replace(',', '.'));
+      if (Number.isFinite(v) && v >= 0) {
+        item.manualPrice = v;
+        item.priceSource = 'Prix saisi à la main';
+      } else {
+        delete item.manualPrice;
+        delete item.priceSource;
+      }
       saveCollection();
       renderCollection();
     });
 
-    tr.querySelector('.cm-open').addEventListener('click', () => openCardmarketDialog(item));
+    el.querySelector('.cm-open').addEventListener('click', () => openCardmarketDialog(item));
 
-    tr.querySelector('.link:not(.cm-open)').addEventListener('click', () => {
-      collection.splice(idx, 1);
+    el.querySelector('.c-remove').addEventListener('click', () => {
+      const i = collection.indexOf(item);
+      if (i < 0) return;
+      collection.splice(i, 1);
       saveCollection();
       renderCollection();
+      toast(`${item.name} retirée`, {
+        label: 'Annuler',
+        onClick() {
+          collection.splice(Math.min(i, collection.length), 0, item);
+          saveCollection();
+          renderCollection();
+        },
+      });
     });
 
-    tbody.appendChild(tr);
-  });
+    list.appendChild(el);
+  }
 
   if (browseCards.length) renderBrowse();
+  const cards = `${count} carte${count > 1 ? 's' : ''}`;
   $('grandTotal').textContent = euro.format(total);
-  $('count').textContent = count ? `(${count} carte${count > 1 ? 's' : ''})` : '';
+  $('count').textContent = count ? cards : '';
+  $('sumTotal').textContent = euro.format(total);
+  $('sumCount').textContent = String(count);
+  $('sumTop').textContent = top && unitPrice(top) > 0 ? euro.format(unitPrice(top)) : '–';
+  $('sumTopName').textContent = top && unitPrice(top) > 0 ? top.name : '';
+  $('tabCount').textContent = String(count);
+  $('tabCount').hidden = !count;
+}
+
+$('colFilter').addEventListener('input', renderCollection);
+$('colSort').addEventListener('change', renderCollection);
+
+// ---------- UI: navigation and toast ----------
+
+const VIEWS = ['scan', 'extensions', 'collection', 'compte'];
+
+function showView() {
+  const name = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'scan';
+  for (const v of document.querySelectorAll('[data-view]')) v.hidden = v.dataset.view !== name;
+  for (const a of document.querySelectorAll('[data-tab]')) {
+    a.classList.toggle('active', a.dataset.tab === name);
+    if (a.dataset.tab === name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  window.scrollTo(0, 0);
+  $('toast').hidden = true;
+}
+window.addEventListener('hashchange', showView);
+
+let toastTimer = null;
+// Short message at the bottom of the screen, with an optional link or action.
+function toast(message, action = null) {
+  const el = $('toast');
+  el.textContent = message;
+  if (action) {
+    const a = document.createElement('a');
+    a.href = action.href || '#';
+    a.textContent = action.label;
+    a.addEventListener('click', (e) => {
+      if (action.onClick) { e.preventDefault(); action.onClick(); }
+      el.hidden = true;
+    });
+    el.appendChild(a);
+  }
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 4000);
 }
 
 // ---------- Cardmarket offers ----------
@@ -1068,6 +1191,7 @@ $('accDelete').addEventListener('click', async () => {
   }
 });
 
+showView();
 renderCollection();
 loadSetList();
 Sync.resume();

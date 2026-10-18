@@ -1,4 +1,4 @@
-# Estimation de collection Pokémon
+# CoteCartes · estimation de collection Pokémon
 
 Petite appli web (100 % statique) pour estimer la valeur d'une collection de cartes Pokémon :
 
