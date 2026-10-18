@@ -45,6 +45,9 @@ jobs:
           if [ "$STATUS" != 200 ] || ! jq -e '.success' /tmp/verify.json >/dev/null; then
             echo "::error::Cloudflare refuse le jeton (HTTP $STATUS). Recolle uniquement le jeton (cfat_...) dans CLOUDFLARE_API_TOKEN et vérifie l'Account ID."
             jq -c '.errors' /tmp/verify.json || true
+            # Shape only, never the value.
+            echo "Longueur du jeton : ${#TOKEN}, début : ${TOKEN:0:5}, caractères inattendus : $(printf '%s' "$TOKEN" | tr -d 'A-Za-z0-9_-' | wc -c)"
+            echo "Longueur de l'Account ID : ${#ACCOUNT} (attendu : 32)"
             exit 1
           fi
           echo "Jeton Cloudflare valide."
