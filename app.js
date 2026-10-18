@@ -85,19 +85,30 @@ async function findByNumber(lang, num, total) {
     }
   }));
 
-  // Reprints such as the Celebrations "Classic Collection" keep their original
-  // number (4/102) but are stored as "4_A" inside a much smaller set.
+  // "Classic Collection" reprints (Celebrations, 30th Celebration) keep the
+  // printed number of the original card (Dracaufeu 4/102) but TCGdex numbers
+  // them 001…030 inside their own small set, so match them by name instead.
+  const names = new Set(found.filter(Boolean).map((c) => c.name));
   let reprints = [];
-  try {
-    const list = await getJSON(`${API}/${lang}/cards?localId=like:${num}_`);
-    reprints = await Promise.all(list
-      .filter((c) => parseInt(c.localId, 10) === num)
-      .slice(0, MAX_CANDIDATE_SETS)
-      .map((c) => getCard(lang, c.id).catch(() => null)));
-  } catch { /* optional lookup */ }
+  if (names.size) {
+    const classicSets = sets.filter((s) => /classi/i.test(s.name)).reverse();
+    reprints = (await Promise.all(classicSets.map(async (set) => {
+      try {
+        const full = await getJSON(`${API}/${lang}/sets/${encodeURIComponent(set.id)}`);
+        return Promise.all((full.cards || [])
+          .filter((c) => names.has(c.name))
+          .map((c) => getCard(lang, c.id).catch(() => null)));
+      } catch {
+        return [];
+      }
+    }))).flat();
+  }
 
+  const printed = `${num}/${total}`;
   const seen = new Set();
-  return [...reprints, ...found].filter((c) => c && !seen.has(c.id) && seen.add(c.id));
+  return [...reprints, ...found]
+    .filter((c) => c && !seen.has(c.id) && seen.add(c.id))
+    .map((c) => ({ ...c, printed }));
 }
 
 async function findByName(lang, name) {
@@ -105,9 +116,11 @@ async function findByName(lang, name) {
   return list.slice(0, 24);
 }
 
-// "4_A" (Classic Collection reprint) is printed as "4" on the card.
+// Number as printed on the card: reprints found by number keep the one read on
+// the photo, since TCGdex renumbers them inside their own set.
 function displayNumber(card) {
-  return `${String(card.localId).replace(/_.*$/, '')}/${card.set.cardCount.official}`;
+  if (card.printed) return card.printed;
+  return `${card.localId}/${card.set.cardCount.official}`;
 }
 
 // ---------- Pricing ----------
@@ -233,6 +246,13 @@ function renderResults(cards) {
   if (!cards.length) {
     box.innerHTML = '<p class="muted">Aucune carte trouvée. Corrige le numéro ou cherche par nom.</p>';
     return;
+  }
+  if (cards.length > 1) {
+    const hint = document.createElement('p');
+    hint.className = 'muted hint';
+    hint.textContent = 'Plusieurs cartes portent ce numéro : compare les logos et tampons '
+      + '(ex. Pikachu « 30 » pour les 30 ans) et choisis la tienne.';
+    box.appendChild(hint);
   }
   for (const card of cards) box.appendChild(resultCard(card));
 }

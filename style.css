@@ -92,3 +92,4 @@ td.num, th.num { text-align: right; }
 label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: .95rem; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 [hidden] { display: none !important; }
+.results .hint { grid-column: 1 / -1; margin: 0; }
