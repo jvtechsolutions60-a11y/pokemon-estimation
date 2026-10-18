@@ -24,6 +24,19 @@ test('lecture du numéro', () => withPage({}, async (page) => {
   assert.deepEqual(r, [{ num: 145, total: 147 }, null, { num: 4, total: 102 }]);
 }));
 
+test('numéro mal lu : variantes plausibles, seulement avec un vrai total d\u2019extension', () => withPage({}, async (page) => {
+  const r = await page.evaluate(() => {
+    const totals = new Set([165, 193, 147]);
+    const g = (hits) => numberGuesses(hits, totals).map((x) => `${x.num}/${x.total}`);
+    return { dot: parseNumber('Moyen 128.165 @'), rattata: g([{ num: 120, total: 165 }]), sv: g([{ num: 906, total: 793 }]) };
+  });
+  assert.deepEqual(r.dot, { num: 128, total: 165 });
+  assert.equal(r.rattata[0], '120/165');
+  assert.ok(r.rattata.includes('128/165'));
+  assert.ok(r.sv.includes('6/193'), r.sv.join(' '));
+  assert.ok(!r.sv.some((x) => x.endsWith('/793')));
+}));
+
 test('nom lu sur la photo, même abîmé par l’OCR', () => withPage({}, async (page) => {
   const r = await page.evaluate(() => [
     nameOnPhoto({ name: 'Carchacrok C NIV.X' }, 'Carchacrok C NlV.X 100PV'),

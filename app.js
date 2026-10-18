@@ -5,6 +5,7 @@ const STORE_KEY = 'pokemon-estimation:collection';
 const SETS_CACHE_KEY = 'pokemon-estimation:sets:';
 const SETS_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CANDIDATE_SETS = 10;
+const POCKET_SET_RE = /^(?:[AB]\d+[a-z]?|P-[A-Z])$/;
 
 // Indicative discount per Cardmarket condition.
 const CONDITIONS = {
@@ -128,12 +129,25 @@ async function getSets(lang) {
   if (cached) {
     try {
       const { at, sets } = JSON.parse(cached);
-      if (Date.now() - at < SETS_TTL_MS) return sets;
+      if (Date.now() - at < SETS_TTL_MS) return sets.filter((s) => !POCKET_SET_RE.test(s.id));
     } catch { /* ignore broken cache */ }
   }
-  const sets = await getJSON(`${API}/${lang}/sets`);
+  // TCG Pocket (A1, B2a, P-A…) is a phone game: its cards can't be photographed.
+  const sets = (await getJSON(`${API}/${lang}/sets`)).filter((s) => !POCKET_SET_RE.test(s.id));
   safeSet(SETS_CACHE_KEY + lang, JSON.stringify({ at: Date.now(), sets }));
   return sets;
+}
+
+// A set's card list, fetched once per visit: several number guesses reuse it.
+const setDetails = new Map();
+function getSetFull(lang, id) {
+  const key = `${lang}:${id}`;
+  if (!setDetails.has(key)) {
+    const p = getJSON(`${API}/${lang}/sets/${encodeURIComponent(id)}`);
+    p.catch(() => setDetails.delete(key)); // retry next time
+    setDetails.set(key, p);
+  }
+  return setDetails.get(key);
 }
 
 async function getCard(lang, id) {
@@ -141,16 +155,20 @@ async function getCard(lang, id) {
 }
 
 // Finds every card numbered `num` in a set whose size is `total`.
-async function findByNumber(lang, num, total) {
-  const sets = await getSets(lang);
+function setsWithTotal(sets, total) {
   let candidates = sets.filter((s) => s.cardCount && s.cardCount.official === total);
   if (!candidates.length) candidates = sets.filter((s) => s.cardCount && s.cardCount.total === total);
-  candidates = candidates.slice(-MAX_CANDIDATE_SETS).reverse();
+  return candidates.slice(-MAX_CANDIDATE_SETS).reverse();
+}
+
+async function findByNumber(lang, num, total) {
+  const sets = await getSets(lang);
+  const candidates = setsWithTotal(sets, total);
 
   let failed = 0;
   const found = await Promise.all(candidates.map(async (set) => {
     try {
-      const full = await getJSON(`${API}/${lang}/sets/${encodeURIComponent(set.id)}`);
+      const full = await getSetFull(lang, set.id);
       const brief = (full.cards || []).find((c) => parseInt(c.localId, 10) === num);
       return brief ? await getCard(lang, brief.id) : null;
     } catch {
@@ -168,7 +186,7 @@ async function findByNumber(lang, num, total) {
     const classicSets = sets.filter((s) => /classi/i.test(s.name)).reverse();
     reprints = (await Promise.all(classicSets.map(async (set) => {
       try {
-        const full = await getJSON(`${API}/${lang}/sets/${encodeURIComponent(set.id)}`);
+        const full = await getSetFull(lang, set.id);
         return await Promise.all((full.cards || [])
           .filter((c) => names.has(c.name))
           .map((c) => getCard(lang, c.id).catch(() => { failed += 1; return null; })));
@@ -329,12 +347,51 @@ function prepareBand(img, fromY, toY, threshold, invert) {
   return canvas;
 }
 
-// Returns the most plausible "num/total" read in the text.
-function parseNumber(text) {
-  const matches = [...text.matchAll(/(?<![\d,.])(\d{1,3})\s*\/\s*(\d{2,3})(?!\d)/g)]
+// Every "num/total" read in the text. OCR often turns the slash into a dot or a bar.
+function parseNumbers(text) {
+  return [...text.matchAll(/(?<![\d,])(\d{1,3})\s*[/.|\\]\s*(\d{2,3})(?![\d,])/g)]
     .map((m) => ({ num: parseInt(m[1], 10), total: parseInt(m[2], 10) }))
     .filter((m) => m.num > 0 && m.total >= 10 && m.num <= m.total * 2);
-  return matches[0] || null;
+}
+
+// The most plausible "num/total" read in the text.
+function parseNumber(text) {
+  return parseNumbers(text)[0] || null;
+}
+
+// Digits Tesseract mixes up on the small print of cards.
+const DIGIT_LOOKALIKES = { 0: '896', 1: '74', 2: '7', 3: '85', 4: '1', 5: '638', 6: '05', 7: '12', 8: '0365', 9: '0' };
+
+function lookalikes(n) {
+  const digits = String(n);
+  const out = [];
+  for (let i = 0; i < digits.length; i++) {
+    for (const d of DIGIT_LOOKALIKES[digits[i]] || '') out.push(parseInt(digits.slice(0, i) + d + digits.slice(i + 1), 10));
+  }
+  out.push(parseInt(`1${digits}`, 10)); // a leading "1" is often lost
+  return out.filter((x) => x > 0);
+}
+
+// Readings to try, best first: what was read, then the same with one digit
+// fixed, kept only when the total is a real set size.
+function numberGuesses(hits, totals) {
+  const seen = new Set();
+  const out = [];
+  const add = (num, total) => {
+    const key = `${num}/${total}`;
+    if (!totals.has(total) || num > total * 2 || seen.has(key)) return;
+    seen.add(key);
+    out.push({ num, total });
+  };
+  for (const h of hits) add(h.num, h.total);
+  for (const h of hits) {
+    const fixedTotals = totals.has(h.total) ? [h.total] : lookalikes(h.total).filter((t) => totals.has(t));
+    for (const t of fixedTotals) {
+      add(h.num, t);
+      for (const n of lookalikes(h.num)) add(n, t);
+    }
+  }
+  return out;
 }
 
 // Each pass: [band start, band end, threshold, light text on dark background].
@@ -345,6 +402,21 @@ const OCR_PASSES = [
   [0.8, 1, 200, true],
   [0.65, 1, 120, false],
 ];
+
+// All the readings of every pass (stops at the first pass for which
+// `accept` says yes).
+async function readNumberHits(img, accept = async () => false) {
+  const worker = await getWorker();
+  const hits = [];
+  for (const [from, to, threshold, invert] of OCR_PASSES) {
+    const band = prepareBand(img, from, to, threshold, invert);
+    const { data } = await worker.recognize(band);
+    const found = parseNumbers(data.text);
+    hits.push(...found);
+    if (found.length && await accept(hits)) break;
+  }
+  return hits;
+}
 
 async function readCardNumber(img) {
   const worker = await getWorker();
@@ -408,8 +480,8 @@ function nameOnPhoto(card, topText) {
 // Cards whose name is on the photo come first; the others are returned apart.
 function rankByName(cards, topText) {
   const hits = cards.filter((c) => nameOnPhoto(c, topText));
-  if (!hits.length) return { cards, others: [] };
-  return { cards: hits, others: cards.filter((c) => !hits.includes(c)) };
+  if (!hits.length) return { cards, others: [], named: false };
+  return { cards: hits, others: cards.filter((c) => !hits.includes(c)), named: true };
 }
 
 // ---------- Visual match ----------
@@ -718,19 +790,46 @@ const LANG_NAMES = { fr: 'français', en: 'anglais', de: 'allemand', it: 'italie
 // Reads one photo: number, language, the matching cards and, when it is clear,
 // which of them is on the photo. `sure` means it can be added without asking.
 async function identifyPhoto(img, onStep = () => {}) {
-  const hit = await readCardNumber(img);
   const text = await readCardText(img).catch(() => ({ top: '', all: '' }));
   const detected = detectLanguage(text.all);
   if (detected) $('lang').value = detected;
+  const cardLang = lang();
+  const sets = await getSets(cardLang);
+  const totals = new Set(sets.flatMap((s) => (s.cardCount ? [s.cardCount.official, s.cardCount.total] : [])));
+
+  // A reading is confirmed when a card with that number has the name read at
+  // the top of the photo: a digit misread then can't add the wrong card.
+  const named = async (guess) => {
+    for (const set of setsWithTotal(sets, guess.total)) {
+      try {
+        const full = await getSetFull(cardLang, set.id);
+        if ((full.cards || []).some((c) => parseInt(c.localId, 10) === guess.num && nameOnPhoto(c, text.top))) return true;
+      } catch { /* set unavailable */ }
+    }
+    return false;
+  };
+  let confirmed = null;
+  const tried = new Set();
+  const accept = async (hits) => {
+    for (const guess of numberGuesses(hits, totals).slice(0, 12)) {
+      const key = `${guess.num}/${guess.total}`;
+      if (tried.has(key)) continue;
+      tried.add(key);
+      if (await named(guess)) { confirmed = guess; return true; }
+    }
+    return false;
+  };
+  const hits = text.top.trim() ? await readNumberHits(img, accept) : await readNumberHits(img, async () => true);
+  const hit = confirmed || numberGuesses(hits, totals)[0] || hits[0] || null;
   if (!hit) return { hit, detected, cards: [], best: null, sure: false };
   onStep(hit, detected);
-  const all = await findByNumber(lang(), hit.num, hit.total);
+  const all = await findByNumber(cardLang, hit.num, hit.total);
   const ranked = rankByName(all, text.top);
   let { cards } = ranked;
   let best = null;
   if (cards.length > 1) ({ cards, best } = await rankByImage(cards, img));
-  // A set that did not answer may hold the real card: never add blindly then.
-  const sure = !all.incomplete && (cards.length === 1 || Boolean(best));
+  // Added without asking only when the name matches too, and no set is missing.
+  const sure = ranked.named && !all.incomplete && (cards.length === 1 || Boolean(best));
   return { hit, detected, cards, others: ranked.others, best, sure, incomplete: all.incomplete, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
 }
 
