@@ -2,7 +2,38 @@
 // as a simulated phone photo (background, tilt, lighting, blur, JPEG).
 // Usage: node bench.mjs [cards=100] [seed=1]   (needs internet: run by CI)
 import { writeFile, mkdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { startSite, openSite } from './helpers.mjs';
+
+// Recognition by image (prototype), when an index was built (index-build.mjs).
+let fp = null;
+try {
+  const index = JSON.parse(await readFile(new URL('./fp-index.json', import.meta.url), 'utf8'))
+    .map((e) => ({ ...e, hash: BigInt(`0x${e.h}`), grid: Float32Array.from(e.g) }));
+  fp = { index, ...(await import('./fp-node.mjs')), ...(await import('./fingerprint.mjs')) };
+  console.log(`index d'empreintes : ${index.length} cartes`);
+} catch (e) {
+  console.log(`pas d'index d'empreintes (${e.message}) : reconnaissance par image non testée`);
+}
+
+async function byImage(buf, card, hit, mode) {
+  // A clean scan is already just the card; a photo needs the card found first.
+  const q = mode === 'scan' ? await fp.fingerprintCard(buf) : await fp.fingerprintPhoto(buf);
+  const ranked = fp.index.map((e) => ({ e, d: fp.distance(q, e) })).sort((a, b) => a.d - b.d).slice(0, 20);
+  const pos = ranked.findIndex((r) => r.e.id === card.id);
+  // Hybrid: among the 20 closest images, the one whose number was read.
+  const withNumber = hit && ranked.find((r) => parseInt(r.e.n, 10) === hit.num);
+  const hybrid = withNumber ? withNumber.e.id : ranked[0].e.id;
+  return {
+    imgRank: pos, // -1 = not in the 20 closest
+    imgTop1: pos === 0,
+    imgTop5: pos >= 0 && pos < 5,
+    imgSameName: ranked[0].e.name === card.name,
+    imgGap: Math.round((ranked[1].d - ranked[0].d) * 1000) / 1000,
+    imgFirst: ranked[0].e.id,
+    hybridOk: hybrid === card.id,
+  };
+}
 
 // Any crash shows up as an annotation on the run page.
 const report = (e) => { console.log(`::error title=Banc d'essai::${String(e && e.stack || e).replace(/\n/g, '%0A')}`); process.exit(1); };
@@ -57,11 +88,12 @@ async function officialImage(card) {
 async function runOne(card, mode, seed) {
   const png = await officialImage(card);
   if (!png) return { skipped: 'pas d\u2019image' };
-  return page.evaluate(async ({ card, mode, seed, png }) => {
+  const r = await page.evaluate(async ({ card, mode, seed, png }) => {
     let s = seed >>> 0;
     const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
     const bytes = Uint8Array.from(atob(png), (ch) => ch.charCodeAt(0));
     let file = new File([bytes], 'carte.png', { type: 'image/png' });
+    let photoB64 = null;
     if (mode === 'photo') {
       // Card lying on a table, shot slightly tilted, under uneven light.
       const src = await loadImage(file);
@@ -89,6 +121,7 @@ async function runOne(card, mode, seed) {
       g.fillStyle = light; g.fillRect(0, 0, W, H);
       const jpeg = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.78));
       file = new File([jpeg], 'photo.jpg', { type: 'image/jpeg' });
+      photoB64 = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(jpeg); });
     }
     $('lang').value = 'fr';
     const t0 = performance.now();
@@ -116,8 +149,13 @@ async function runOne(card, mode, seed) {
       pick: res.pick ? res.pick.id : null,
       ms,
       ocr,
+      photoB64,
+      hit: res.hit,
     };
   }, { card, mode, seed, png });
+  const { photoB64, hit, ...out } = r;
+  if (fp) Object.assign(out, await byImage(Buffer.from(photoB64 || png, 'base64'), card, hit, mode));
+  return out;
 }
 
 const rows = [];
@@ -149,6 +187,10 @@ for (const mode of ['scan', 'photo']) {
     autoWrong: ok.filter((r) => r.sure && r.pick !== r.id).length,
     errors: all.length - ok.length,
     ms: Math.round(ok.reduce((a, r) => a + r.ms, 0) / (ok.length || 1)),
+    imgTop1: ok.filter((r) => r.imgTop1).length,
+    imgTop5: ok.filter((r) => r.imgTop5).length,
+    imgSameName: ok.filter((r) => r.imgSameName).length,
+    hybridOk: ok.filter((r) => r.hybridOk).length,
   };
 }
 const line = (label, key, fmt = (m) => pct(stats[m][key], stats[m].total)) => { md += `| ${label} | ${fmt('scan')} | ${fmt('photo')} |\n`; };
@@ -159,6 +201,13 @@ line('Ajout automatique correct', 'autoOk');
 line('Ajout automatique **faux**', 'autoWrong');
 line('Erreurs techniques', 'errors', (m) => String(stats[m].errors));
 line('Temps moyen par carte', 'ms', (m) => `${(stats[m].ms / 1000).toFixed(1)} s`);
+if (fp) {
+  md += `| **Par l'image** (${fp.index.length} cartes connues) | | |\n`;
+  line('Bonne carte en 1er', 'imgTop1');
+  line('Bonne carte dans les 5 premières', 'imgTop5');
+  line('1re carte du bon nom (même illustration)', 'imgSameName');
+  line('Image + numéro lu', 'hybridOk');
+}
 md += '\n## Échecs\n\n| Mode | Carte | Extension | Attendu | Lu | Dans la liste | Choix auto |\n|---|---|---|---|---|---|---|\n';
 for (const r of rows.filter((x) => !x.skipped && (x.error || !x.numberOk || !x.listed || (x.sure && x.pick !== x.id)))) {
   md += `| ${r.mode} | ${r.name} (${r.id}) | ${r.set} | ${r.num}/${r.total} | ${r.error ? `erreur : ${r.error}` : r.read || 'rien'} | ${r.listed ? 'oui' : 'non'} | ${r.sure ? r.pick : '–'} |\n`;

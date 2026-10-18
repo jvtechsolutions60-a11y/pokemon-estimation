@@ -36,6 +36,14 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
+      - name: Empreintes des images officielles (gardées une semaine)
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: tests/fp-index.json
+          key: fp-index-${{ hashFiles('tests/fingerprint.mjs', 'tests/fp-node.mjs', 'tests/index-build.mjs') }}-${{ steps.week.outputs.week }}
+      - run: test -f fp-index.json || node index-build.mjs fp-index.json
       - run: node bench.mjs "${{ inputs.cards }}" "${{ inputs.seed }}"
       - run: cat bench-results/RESULTATS.md >> "$GITHUB_STEP_SUMMARY"
       - name: Publier les résultats sur la branche banc-essai
