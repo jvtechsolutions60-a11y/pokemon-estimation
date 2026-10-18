@@ -471,16 +471,19 @@ async function readCardText(img) {
   return { top, all: `${top}\n${body}` };
 }
 
-// Puts first the cards whose name appears in the text read at the top of the photo.
 // Whether the card's name shows up in the text read at the top of the photo.
-// OCR often mangles symbols and suffixes ("C NIV.X", "ex", "V"), so one long
-// enough word of the name is enough.
+// OCR often mangles symbols and suffixes ("C NIV.X", "ex", "V"), so the first
+// real word of the name is enough, but it has to be that one: "Alola" alone
+// must not confuse "Raichu et Raichu d'Alola" with "Brindibou et Noadkoko d'Alola".
+const GENERIC_NAME_WORDS = new Set(['mega', 'team', 'dresseur', 'energie', 'obscur', 'brillant', 'alola', 'galar', 'hisui', 'paldea']);
+
 function nameOnPhoto(card, topText) {
   const t = fold(topText).replace(/[^a-z0-9]/g, '');
   if (!t) return false;
   const full = fold(card.name).replace(/[^a-z0-9]/g, '');
   if (full.length >= 3 && t.includes(full)) return true;
-  return fold(card.name).split(/[^a-z0-9]+/).some((w) => w.length >= 5 && t.includes(w));
+  const key = fold(card.name).split(/[^a-z0-9]+/).find((w) => w.length >= 4 && !GENERIC_NAME_WORDS.has(w));
+  return Boolean(key && key.length >= 5 && t.includes(key));
 }
 
 // Cards whose name is on the photo come first; the others are returned apart.

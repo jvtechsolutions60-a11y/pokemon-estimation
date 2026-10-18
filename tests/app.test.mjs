@@ -48,8 +48,10 @@ test('nom lu sur la photo, même abîmé par l’OCR', () => withPage({}, async 
   const r = await page.evaluate(() => [
     nameOnPhoto({ name: 'Carchacrok C NIV.X' }, 'Carchacrok C NlV.X 100PV'),
     nameOnPhoto({ name: 'Apocyne' }, 'Carchacrok C NlV.X 100PV'),
+    nameOnPhoto({ name: 'Brindibou et Noadkoko d\u2019Alola GX' }, 'Raichu et Raichu d\u2019Alola GX 210PV'),
+    nameOnPhoto({ name: 'Méga-Dracaufeu X EX' }, 'MEGA Dracaufeu-EX'),
   ]);
-  assert.deepEqual(r, [true, false]);
+  assert.deepEqual(r, [true, false, false, true]);
 }));
 
 test('prix : moyenne 7 jours, reverse sur les champs -holo', () => withPage({}, async (page) => {
