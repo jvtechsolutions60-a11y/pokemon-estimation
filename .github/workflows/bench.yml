@@ -32,7 +32,7 @@ jobs:
       - name: Publier les résultats sur la branche banc-essai
         run: |
           dir="$RUNNER_TEMP/out"
-          git fetch origin banc-essai && git worktree add "$dir" origin/banc-essai || git worktree add --detach "$dir"
+          git fetch origin banc-essai && git worktree add "$dir" origin/banc-essai || git worktree add --orphan -b banc-essai "$dir"
           name="$(date -u +%Y%m%d-%H%M)-${{ github.sha }}"
           mkdir -p "$dir/$name"
           cp bench-results/* "$dir/$name/"
