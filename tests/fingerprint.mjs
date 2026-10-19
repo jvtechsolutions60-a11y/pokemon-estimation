@@ -46,8 +46,7 @@ export function phash(rgb) {
 
 // rgb: GRID_W×GRID_H pixels (the card shrunk to the grid). Normalised per
 // channel so that a darker or yellower photo still matches.
-export function colorGrid(rgb) {
-  const n = GRID_W * GRID_H;
+export function colorGrid(rgb, n = GRID_W * GRID_H) {
   const out = new Float32Array(n * 3);
   for (let c = 0; c < 3; c++) {
     let mean = 0;
@@ -108,4 +107,50 @@ export function findCard(rgb, w, h) {
   const [x0, x1] = span(cols, w, h);
   if (x1 - x0 < w * 0.2 || y1 - y0 < h * 0.2) return { x: 0, y: 0, w, h }; // nothing found: whole photo
   return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+// Card proportions (63 × 88 mm).
+export const CARD_RATIO = 63 / 88;
+
+// Finds the card in a busy photo (playmat, easel, sleeve): the upright
+// rectangle with card proportions whose four sides follow the strongest
+// straight edges. rgb is the photo at w×h (about 200 px wide is enough).
+export function findCardByEdges(rgb, w, h) {
+  const g = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) g[i] = 0.299 * rgb[i * 3] + 0.587 * rgb[i * 3 + 1] + 0.114 * rgb[i * 3 + 2];
+  // Prefix sums of horizontal edges along rows, vertical edges along columns.
+  const hRow = new Float32Array((w + 1) * h);
+  const vCol = new Float32Array(w * (h + 1));
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const dy = Math.abs(g[(y + 1) * w + x] - g[(y - 1) * w + x]);
+      const dx = Math.abs(g[y * w + x + 1] - g[y * w + x - 1]);
+      // An edge only counts where it is mostly in that direction.
+      hRow[y * (w + 1) + x + 1] = dy > dx ? dy : 0;
+      vCol[(y + 1) * w + x] = dx > dy ? dx : 0;
+    }
+  }
+  for (let y = 0; y < h; y++) for (let x = 1; x <= w; x++) hRow[y * (w + 1) + x] += hRow[y * (w + 1) + x - 1];
+  for (let x = 0; x < w; x++) for (let y = 1; y <= h; y++) vCol[y * w + x] += vCol[(y - 1) * w + x];
+  const rowSum = (y, x0, x1) => hRow[y * (w + 1) + x1] - hRow[y * (w + 1) + x0];
+  const colSum = (x, y0, y1) => vCol[y1 * w + x] - vCol[y0 * w + x];
+  // A side is strong when the edge is there all along it, so take the weakest
+  // of the four sides' averages (a single strong side is not a card).
+  const side = (fn, a, b, c) => Math.max(fn(a, b, c), fn(a - 1, b, c), fn(a + 1, b, c)) / (c - b);
+  let best = { score: -1, x: 0, y: 0, w, h };
+  for (let ch = Math.round(h * 0.35); ch <= h - 2; ch += 1) {
+    const cw = Math.round(ch * CARD_RATIO);
+    if (cw >= w - 2) break;
+    for (let y = 1; y + ch < h - 1; y += 1) {
+      for (let x = 1; x + cw < w - 1; x += 1) {
+        const top = side(rowSum, y, x, x + cw);
+        const bottom = side(rowSum, y + ch, x, x + cw);
+        const left = side(colSum, x, y, y + ch);
+        const right = side(colSum, x + cw, y, y + ch);
+        const score = Math.min(top, bottom, left, right) + 0.25 * (top + bottom + left + right) / 4;
+        if (score > best.score) best = { score, x, y, w: cw, h: ch };
+      }
+    }
+  }
+  return best;
 }

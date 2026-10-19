@@ -32,7 +32,7 @@ await Promise.all(Array.from({ length: 24 }, async () => {
     if (buf) {
       try {
         const fp = await fingerprintCard(buf);
-        index.push({ id: c.id, name: c.name, n: c.localId, h: fp.hash.toString(16).padStart(16, '0'), g: [...fp.grid].map((x) => Math.round(x * 100) / 100) });
+        index.push({ id: c.id, name: c.name, n: c.localId, h: fp.hash.toString(16).padStart(16, '0'), g: [...fp.grid].map((x) => Math.round(x * 100) / 100), f: [...fp.fine].map((x) => Math.round(x * 50) / 50) });
       } catch { failed++; }
     } else failed++;
     if (++done % 1000 === 0) console.log(`${done}/${cards.length}`);
