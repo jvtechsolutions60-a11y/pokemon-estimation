@@ -141,7 +141,13 @@ export function findCardByEdges(rgb, w, h) {
   const colSum = (x, y0, y1) => vCol[y1 * w + x] - vCol[y0 * w + x];
   // A side is strong when the edge is there all along it, so take the weakest
   // of the four sides' averages (a single strong side is not a card).
-  const side = (fn, a, b, c) => Math.max(fn(a, b, c), fn(a - 1, b, c), fn(a + 1, b, c)) / (c - b);
+  // A slightly tilted card moves its edge by a row or so: take the best nearby line.
+  const R = 2;
+  const side = (fn, a, b, c) => {
+    let m = 0;
+    for (let k = -R; k <= R; k++) m = Math.max(m, fn(Math.min(Math.max(a + k, 0), fn === rowSum ? h - 1 : w - 1), b, c));
+    return m / (c - b);
+  };
   let best = { score: -1, x: 0, y: 0, w, h };
   for (let ch = Math.round(h * 0.35); ch <= h - 2; ch += 1) {
     const cw = Math.round(ch * CARD_RATIO);

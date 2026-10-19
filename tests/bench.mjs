@@ -18,8 +18,8 @@ try {
 
 async function byImage(buf, card, hit, mode) {
   // A clean scan is already just the card; a photo needs the card found first.
-  const q = mode === 'scan' ? await fp.fingerprintCard(buf) : await fp.fingerprintPhoto(buf);
-  const ranked = fp.index.map((e) => ({ e, d: fp.distance(q, e) })).sort((a, b) => a.d - b.d).slice(0, 20);
+  const qs = mode === 'scan' ? [await fp.fingerprintCard(buf)] : await fp.fingerprintPhotoAll(buf);
+  const ranked = fp.index.map((e) => ({ e, d: Math.min(...qs.map((q) => fp.distance(q, e))) })).sort((a, b) => a.d - b.d).slice(0, 20);
   const pos = ranked.findIndex((r) => r.e.id === card.id);
   // Hybrid: among the 20 closest images, the one whose number was read.
   const withNumber = hit && ranked.find((r) => parseInt(r.e.n, 10) === hit.num);

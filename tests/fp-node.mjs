@@ -13,14 +13,21 @@ export async function fingerprintCard(buf) {
   return { hash: phash(await raw(img, FP_W, FP_H)), grid: colorGrid(await raw(img, GRID_W, GRID_H)), fine: colorGrid(await raw(img, 8, 11), 88) };
 }
 
-// A photo: find the card first, then fingerprint that part only.
+// A photo: find the card first, then fingerprint that part only. Cards are
+// rarely shot perfectly straight, so a few small tilts are tried.
 export async function fingerprintPhoto(buf, method = 'edges') {
-  const img = sharp(await sharp(buf).rotate().toBuffer()); // honours the phone's orientation flag
-  const meta = await img.metadata();
-  const W = method === 'edges' ? 160 : 300;
-  const H = Math.round((meta.height * W) / meta.width);
-  const pixels = await raw(img, W, H);
-  const box = method === 'edges' ? findCardByEdges(pixels, W, H) : findCard(pixels, W, H);
+  const base = await sharp(buf).rotate().toBuffer(); // honours the phone's orientation flag
+  let best = null;
+  for (const angle of method === 'edges' ? [0, -3, 3, -6, 6] : [0]) {
+    const img = sharp(angle ? await sharp(base).rotate(angle, { background: '#000' }).toBuffer() : base);
+    const meta = await img.metadata();
+    const W = method === 'edges' ? 160 : 300;
+    const H = Math.round((meta.height * W) / meta.width);
+    const pixels = await raw(img, W, H);
+    const box = method === 'edges' ? findCardByEdges(pixels, W, H) : findCard(pixels, W, H);
+    if (!best || (box.score ?? 0) > (best.box.score ?? 0)) best = { img, meta, W, box };
+  }
+  const { img, meta, W, box } = best;
   const k = meta.width / W;
   const region = {
     left: Math.max(0, Math.round(box.x * k)),
@@ -30,4 +37,10 @@ export async function fingerprintPhoto(buf, method = 'edges') {
   };
   const card = sharp(await img.clone().extract(region).toBuffer());
   return { box: region, crop: card, hash: phash(await raw(card, FP_W, FP_H)), grid: colorGrid(await raw(card, GRID_W, GRID_H)), fine: colorGrid(await raw(card, 8, 11), 88) };
+}
+
+// Both ways of finding the card; the caller keeps, for each known card, the
+// closer of the two (the wrong crop simply matches nothing well).
+export async function fingerprintPhotoAll(buf) {
+  return [await fingerprintPhoto(buf, "edges")];
 }
