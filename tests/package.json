@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./gh-annotations.mjs --test-reporter-destination=stdout app.test.mjs",
+    "test": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./gh-annotations.mjs --test-reporter-destination=stdout app.test.mjs sync.test.mjs",
     "test:live": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./gh-annotations.mjs --test-reporter-destination=stdout live.test.mjs"
   },
   "devDependencies": {

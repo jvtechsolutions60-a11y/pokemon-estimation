@@ -14,6 +14,10 @@ const Sync = (() => {
 
   const CODE_KEY = 'pokemon-estimation:code';
   const VERSION_KEY = 'pokemon-estimation:version';
+  // The collection as it was at the last exchange with the server: comparing
+  // it with this device and with the server tells who changed what.
+  const BASE_KEY = 'pokemon-estimation:synced';
+  const MAX_CONFLICT_ROUNDS = 3;
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
   const CODE_LENGTH = 20; // 100 bits
   const PBKDF2_ITERATIONS = 300000;
@@ -27,6 +31,16 @@ const Sync = (() => {
   let getExtra = () => ({});
   let onExtra = () => {};
   let onState = () => {};
+  let getLocal = null;
+  let merge = (base, local, remote) => ({ collection: remote, needsPush: false });
+  let pushFailed = false;
+  // Server exchanges run one after the other, so two of them never race on the version.
+  let queue = Promise.resolve();
+  const serial = (fn) => {
+    const run = queue.then(fn, fn);
+    queue = run.catch(() => {});
+    return run;
+  };
 
   // ---------- Storage ----------
 
@@ -38,6 +52,16 @@ const Sync = (() => {
       if (value === null) localStorage.removeItem(key);
       else localStorage.setItem(key, value);
     } catch { /* storage unavailable */ }
+  }
+
+  function readBase() {
+    try {
+      const base = JSON.parse(safeGet(BASE_KEY));
+      return Array.isArray(base) ? base : null;
+    } catch { return null; }
+  }
+  function setBase(collection) {
+    safeSet(BASE_KEY, collection === null ? null : JSON.stringify(collection));
   }
 
   // ---------- Code ----------
@@ -118,17 +142,31 @@ const Sync = (() => {
     return decrypt(payload);
   }
 
-  async function push(collection) {
+  async function push(collection, round = 0) {
     const { status, payload } = await request('PUT', { ...(await encrypt(collection)), version });
     if (status === 409) {
-      // Changed on another device: take the server copy.
+      // Changed on another device meanwhile: merge both sides, then save again.
+      if (round >= MAX_CONFLICT_ROUNDS) throw new Error('Enregistrement impossible : la collection change sur un autre appareil. Réessaie.');
       const remote = await pull();
-      if (remote) onRemote(remote, 'La collection a été modifiée sur un autre appareil : version la plus récente chargée.');
-      return;
+      if (remote === null) throw new Error('Ce compte n\'existe plus.');
+      return reconcile(remote, 'Collection fusionnée avec les changements faits sur un autre appareil.', round + 1);
     }
+    if (status === 400) throw new Error('Enregistrement impossible : collection trop grande pour le compte.');
     if (status !== 200) throw new Error(`Enregistrement impossible (${status})`);
     version = payload.version;
     safeSet(VERSION_KEY, String(version));
+    setBase(collection);
+  }
+
+  // Keeps what changed on this device since the last exchange and what
+  // changed on the server, then saves the result if the server lacks part of it.
+  // Reading this device and showing the result happen in one go, with no wait
+  // in between, so an edit made meanwhile cannot slip through.
+  async function reconcile(remote, message, round = 0) {
+    const { collection, needsPush } = merge(readBase() || [], getLocal ? getLocal() : remote, remote);
+    onRemote(collection, needsPush ? message : null);
+    if (needsPush) await push(collection, round);
+    else setBase(remote);
   }
 
   // ---------- Public API ----------
@@ -149,7 +187,9 @@ const Sync = (() => {
         session = null;
         throw new Error('Aucun compte ne correspond à ce code.');
       }
+      // Logging in replaces this device's collection (the user confirmed it).
       onRemote(remote, null);
+      setBase(remote);
     }
     safeSet(CODE_KEY, code);
     setState('connected', 'Synchronisé');
@@ -164,8 +204,12 @@ const Sync = (() => {
     normalizeCode,
 
     // getExtra/onExtra carry data saved beside the collection (value history).
-    init({ onRemoteCollection, onStateChange, getExtra: extraGetter, onExtra: extraHandler }) {
+    // getLocal returns this device's collection; merge(base, local, remote)
+    // returns { collection, needsPush }.
+    init({ onRemoteCollection, onStateChange, getExtra: extraGetter, onExtra: extraHandler, getLocal: localGetter, merge: merger }) {
       onRemote = onRemoteCollection;
+      if (localGetter) getLocal = localGetter;
+      if (merger) merge = merger;
       if (extraGetter) getExtra = extraGetter;
       if (extraHandler) onExtra = extraHandler;
       onState = onStateChange;
@@ -177,16 +221,23 @@ const Sync = (() => {
       try {
         session = await deriveSession(code);
         version = parseInt(safeGet(VERSION_KEY), 10) || 0;
-        const remote = await pull();
-        if (remote === null) {
+        const gone = await serial(async () => {
+          const remote = await pull();
+          if (remote === null) return true;
+          // Changes made here while offline are merged, not overwritten.
+          await reconcile(remote, null);
+          return false;
+        });
+        if (gone) {
           // Deleted from another device.
           this.logout();
           setState('error', 'Ce compte n\'existe plus. Ta collection reste sur cet appareil.');
           return;
         }
-        onRemote(remote, null);
+        pushFailed = false;
         setState('connected', 'Synchronisé');
       } catch (e) {
+        pushFailed = true;
         setState('error', e.message);
       }
     },
@@ -201,9 +252,12 @@ const Sync = (() => {
       setState('busy', 'Enregistrement…');
       pushTimer = setTimeout(async () => {
         try {
-          await push(collection);
+          await serial(() => push(getLocal ? getLocal() : collection));
+          pushFailed = false;
           setState('connected', 'Synchronisé');
         } catch (e) {
+          // Kept on this device; sent again when the network comes back.
+          pushFailed = true;
           setState('error', e.message);
         }
       }, 800);
@@ -215,6 +269,8 @@ const Sync = (() => {
       version = 0;
       safeSet(CODE_KEY, null);
       safeSet(VERSION_KEY, null);
+      setBase(null);
+      pushFailed = false;
       setState('disconnected');
     },
 
@@ -222,6 +278,11 @@ const Sync = (() => {
       const { status } = await request('DELETE');
       if (status !== 200 && status !== 404) throw new Error(`Suppression impossible (${status})`);
       this.logout();
+    },
+
+    // Retry after a failed save, e.g. when the network comes back.
+    retry() {
+      if (session && pushFailed && getLocal) this.changed(getLocal());
     },
 
     // Exposed for tests.

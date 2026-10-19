@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191500';
+const APP_VERSION = '202610191600';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -1910,7 +1910,63 @@ function showAccount(view) {
   for (const id of ['accDisabled', 'accOut', 'accNew', 'accIn']) $(id).hidden = id !== view;
 }
 
+// Same card, language, print and condition = same entry, whatever its position.
+function entryKey(item) {
+  return `${item.id}|${item.lang}|${item.variant}|${item.condition}`;
+}
+
+// Three-way merge between the collection at the last sync (base), this device
+// and the server. Each side keeps its own changes; when both changed the same
+// entry, quantity changes add up and the newer Cardmarket price wins. A card
+// deleted on one side but changed on the other is kept: better a card too many
+// than one lost.
+function mergeCollections(base, local, remote) {
+  const keyed = (list) => {
+    const map = new Map();
+    for (const item of sanitizeCollection(list)) {
+      let n = 0;
+      while (map.has(`${entryKey(item)}#${n}`)) n += 1;
+      map.set(`${entryKey(item)}#${n}`, item);
+    }
+    return map;
+  };
+  const b = keyed(base);
+  const l = keyed(local);
+  const r = keyed(remote);
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const merged = [];
+  for (const key of new Set([...r.keys(), ...l.keys()])) {
+    const was = b.get(key);
+    const here = l.get(key);
+    const there = r.get(key);
+    let item;
+    if (same(here, was)) item = there;
+    else if (same(there, was)) item = here;
+    else if (!here || !there) item = here || there;
+    else {
+      item = { ...here };
+      item.qty = Math.max(1, was ? here.qty + there.qty - was.qty : Math.max(here.qty, there.qty));
+      if ((Date.parse(there.marketDate) || 0) > (Date.parse(here.marketDate) || 0)) {
+        for (const k of ['marketPrice', 'marketKey', 'marketDate']) {
+          if (k in there) item[k] = there[k]; else delete item[k];
+        }
+      }
+      if (same(here.manualPrice, was && was.manualPrice) && 'manualPrice' in there) {
+        item.manualPrice = there.manualPrice;
+        if (there.priceSource) item.priceSource = there.priceSource;
+      }
+    }
+    if (item) merged.push(item);
+  }
+  return merged;
+}
+
 Sync.init({
+  getLocal: () => collection,
+  merge(base, local, remote) {
+    const merged = mergeCollections(base, local, remote);
+    return { collection: merged, needsPush: JSON.stringify(merged) !== JSON.stringify(sanitizeCollection(remote)) };
+  },
   getExtra: () => ({ history: valueHistory }),
   onExtra(extra) { if (extra && extra.history) mergeHistory(extra.history); },
   onRemoteCollection(remote, message) {
@@ -2058,3 +2114,4 @@ showView();
 renderCollection();
 loadSetList();
 Sync.resume();
+addEventListener('online', () => Sync.retry());
