@@ -22,6 +22,7 @@ function fakeServer() {
     if (req.method() === 'GET') return route.fulfill(row ? { json: row, headers: cors } : { status: 404, json: {}, headers: cors });
     if (req.method() === 'PUT') {
       const { iv, data, version } = req.postDataJSON();
+      if (data.length > 700000) return route.fulfill({ status: 400, json: {}, headers: cors });
       if ((row ? row.version : 0) !== version) return route.fulfill({ status: 409, json: {}, headers: cors });
       vaults.set(id, { iv, data, version: version + 1 });
       server.puts += 1;
@@ -106,6 +107,44 @@ test('fusion : chaque côté garde ses changements', async () => {
       };
     });
     assert.deepEqual(r, { qty: 'a×5', deletedHereChangedThere: 'a×2', deletedThere: 'b×1', noBase: 'b×1 a×2', manual: 'a×2@5', newerPrice: 3 });
+  } finally {
+    await browser.close();
+  }
+});
+
+test('grosse collection : compressée pour tenir sur le compte', async () => {
+  const server = fakeServer();
+  const a = await device(server);
+  const b = await device(server);
+  try {
+    const code = await a.page.evaluate(async () => {
+      collection = sanitizeCollection(Array.from({ length: 4000 }, (_, i) => ({ id: `big-${i}`, name: `Carte numéro ${i}`, set: 'Extension de test', number: `${i}/4000`, image: `https://assets.tcgdex.net/fr/swsh/swsh1/${i}/low.webp`, qty: 1, marketPrice: 1.5, marketDate: '2026-10-18T00:00:00.000Z' })));
+      saveCollection();
+      const c = Sync.generateCode();
+      await Sync.create(c, collection);
+      return c;
+    });
+    await b.page.evaluate((c) => Sync.login(c), code);
+    assert.equal(await b.page.evaluate(() => collection.length), 4000);
+  } finally {
+    await a.browser.close();
+    await b.browser.close();
+  }
+});
+
+test('sauvegarde sur fichier : restaurer ajoute sans rien supprimer', async () => {
+  const { browser, page, errors } = await openSite(site, tcgdex().handler);
+  page.on('dialog', (d) => d.accept());
+  try {
+    await add(page, 'keep', 1);
+    const file = { kind: 'cotecartes-sauvegarde', version: 1, saved: '2026-10-19T10:00:00Z', collection: [card('keep', 2), card('new', 1)], history: [{ d: '2026-10-01', v: 3, n: 3 }] };
+    await page.setInputFiles('#backupFile', { name: 's.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+    await page.waitForFunction(() => document.getElementById('backupMsg').textContent);
+    assert.equal(await ids(page), 'keep×2 new×1');
+    assert.match(await page.textContent('#backupMsg'), /1 nouvelle carte/);
+    await page.setInputFiles('#backupFile', { name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"a":1}') });
+    await page.waitForFunction(() => /pas une sauvegarde/.test(document.getElementById('backupMsg').textContent));
+    assert.deepEqual(errors, []);
   } finally {
     await browser.close();
   }

@@ -86,7 +86,13 @@ const Sync = (() => {
   // ---------- Crypto ----------
 
   const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+  // By slices: spreading a whole large collection into one call overflows the stack.
+  const b64 = (buf) => {
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
   const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
   async function deriveSession(code) {
@@ -103,18 +109,27 @@ const Sync = (() => {
     return { id, auth, key, code };
   }
 
+  // The server takes up to 700 000 base64 characters (about 520 000 bytes).
+  // Bigger collections (about 1 700 different cards and more) are gzipped
+  // first; smaller ones stay plain JSON, readable by older versions of the site.
+  const COMPRESS_FROM = 400000;
+  const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+
   async function encrypt(collection) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const plain = enc.encode(JSON.stringify({ v: 1, ...getExtra(), collection }));
+    let plain = enc.encode(JSON.stringify({ v: 1, ...getExtra(), collection }));
+    if (plain.length > COMPRESS_FROM && typeof CompressionStream === 'function') plain = await pipe(plain, new CompressionStream('gzip'));
     const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(session.id) }, session.key, plain);
     return { iv: b64(iv), data: b64(cipher) };
   }
 
   async function decrypt({ iv, data }) {
-    const plain = await crypto.subtle.decrypt(
+    let plain = new Uint8Array(await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: unb64(iv), additionalData: enc.encode(session.id) },
       session.key, unb64(data),
-    );
+    ));
+    // gzip starts with 1f 8b, JSON with "{".
+    if (plain[0] === 0x1f && plain[1] === 0x8b) plain = await pipe(plain, new DecompressionStream('gzip'));
     const { collection, v, ...extra } = JSON.parse(new TextDecoder().decode(plain));
     onExtra(extra);
     return collection;

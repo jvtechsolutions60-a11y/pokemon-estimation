@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191630';
+const APP_VERSION = '202610191700';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -1911,6 +1911,51 @@ $('export').addEventListener('click', () => {
   a.download = `collection-pokemon-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
+});
+
+// ---------- Backup file ----------
+//
+// The whole collection and its value history as JSON. Restoring adds the
+// file's cards to the current collection (the same three-way merge as the
+// account, with nothing as common base): nothing already here is removed.
+
+const BACKUP_KIND = 'cotecartes-sauvegarde';
+
+$('backupSave').addEventListener('click', () => {
+  const data = { kind: BACKUP_KIND, version: 1, saved: new Date().toISOString(), collection, history: valueHistory };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  a.download = `cotecartes-sauvegarde-${localDay()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  $('backupMsg').textContent = `Sauvegarde de ${collection.length} carte${collection.length > 1 ? 's' : ''} téléchargée.`;
+});
+
+$('backupFile').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    data = null;
+  }
+  if (!data || data.kind !== BACKUP_KIND || !Array.isArray(data.collection)) {
+    $('backupMsg').textContent = 'Ce fichier n\'est pas une sauvegarde CoteCartes.';
+    return;
+  }
+  const cards = sanitizeCollection(data.collection);
+  const copies = cards.reduce((n, i) => n + i.qty, 0);
+  const when = Date.parse(data.saved) ? ` du ${new Date(data.saved).toLocaleDateString('fr-FR')}` : '';
+  if (!confirm(`Sauvegarde${when} : ${copies} carte${copies > 1 ? 's' : ''}. Les ajouter à ta collection ? Rien n'est supprimé ; une carte présente des deux côtés garde la plus grande quantité.`)) return;
+  const before = collection.length;
+  collection = mergeCollections([], collection, cards);
+  if (Array.isArray(data.history)) mergeHistory(data.history);
+  saveCollection();
+  renderCollection();
+  const added = collection.length - before;
+  $('backupMsg').textContent = `Sauvegarde restaurée : ${added} nouvelle${added > 1 ? 's' : ''} carte${added > 1 ? 's' : ''}.`;
 });
 
 $('clear').addEventListener('click', () => {
