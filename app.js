@@ -30,6 +30,11 @@ const PRICE_KEY_LABELS = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+// Shown at the top of the page, to check the phone runs the latest version.
+// Same value as the ?v= of the files in index.html: change both together.
+const APP_VERSION = '202610190855';
+$('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
 // Card data comes from a third-party API (and synced vaults), so only image

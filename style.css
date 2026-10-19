@@ -47,6 +47,12 @@ h3 { margin: 0 0 6px; }
 [hidden] { display: none !important; }
 
 /* ---------- Top bar ---------- */
+.app-version {
+  position: absolute; bottom: -9px; right: 12px; z-index: 30;
+  background: #fff; color: #c8102e; border: 1px solid #c8102e; border-radius: 6px;
+  font-size: .7rem; font-weight: 800; line-height: 1; padding: 2px 5px;
+  pointer-events: none;
+}
 .topbar {
   position: sticky; top: 0; z-index: 20;
   background: linear-gradient(120deg, var(--accent), var(--accent-2));
