@@ -91,7 +91,7 @@ h3 { margin: 0 0 6px; }
 /* ---------- Tabs (bottom on mobile, top on desktop) ---------- */
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   height: calc(var(--tabs-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--panel); border-top: 1px solid var(--border);
@@ -117,7 +117,7 @@ h3 { margin: 0 0 6px; }
   .tabs {
     position: static; height: auto; width: max-content; max-width: calc(100% - 32px);
     margin: 16px auto 0; padding: 4px; gap: 4px;
-    grid-template-columns: repeat(4, auto);
+    grid-template-columns: repeat(5, auto);
     border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
   }
   .tabs a { flex-direction: row; gap: 8px; padding: 8px 18px; border-radius: 10px; font-size: .95rem; }
@@ -391,3 +391,18 @@ label.btn { flex-direction: row; cursor: pointer; font-size: 1rem; }
 .install { min-height: 0; padding: 6px 12px; border-radius: 999px; background: #fff; color: var(--accent); font-size: .85rem; }
 .ios-hint { margin-top: 8px !important; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--text) !important; font-size: .88rem; }
 .results .more-results { grid-column: 1 / -1; justify-self: start; }
+
+/* ---------- Wishlist ---------- */
+.card .wish-btn { min-height: 34px; padding: 6px 10px; font-size: .85rem; }
+.tick-wish {
+  position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: 50%;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--border); font-size: 1rem; line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+.tick-wish.on { color: var(--gold); border-color: var(--gold); }
+.item.wish.deal { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok), var(--shadow); }
+.wish-deal {
+  display: inline-block; margin-top: 4px; background: var(--ok); color: #fff; font-weight: 700; font-size: .75rem;
+  padding: 2px 8px; border-radius: 999px;
+}
+.item-actions a.btn { min-height: 32px; padding: 4px 10px; font-size: .8rem; font-weight: 600; }
