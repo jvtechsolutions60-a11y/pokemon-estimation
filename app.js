@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610190855';
+const APP_VERSION = '202610190915';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -969,6 +969,13 @@ async function identifyPhoto(img, onStep = () => {}) {
       const light = await readTopLight(img).catch(() => '');
       ranked = rankByName(all, `${text.top}\n${light}`);
     }
+    // Last resort: the attacks often name the Pokémon ("attachée à Démolosse").
+    // Weaker proof, so it only counts when the image picks that same card.
+    let nameFromBody = false;
+    if (!ranked.named && all.length) {
+      ranked = rankByName(all, text.all);
+      nameFromBody = ranked.named;
+    }
     let { cards } = ranked;
     let best = null;
     const alike = matches ? alsoLookAlike([...cards, ...ranked.others], matches) : [];
@@ -989,7 +996,7 @@ async function identifyPhoto(img, onStep = () => {}) {
     }
     const others = ranked.others.filter((c) => !cards.includes(c));
     // Added without asking only when the name matches too, and no set is missing.
-    const sure = ranked.named && !nameDisagrees && !all.incomplete && (cards.length === 1 || Boolean(best));
+    const sure = ranked.named && !nameDisagrees && !all.incomplete && (nameFromBody ? Boolean(best) : (cards.length === 1 || Boolean(best)));
     const pick = sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null;
     if (cards.length || !matches) return { hit, detected, cards, others, best, sure, incomplete: all.incomplete, pick };
   }
