@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191000';
+const APP_VERSION = '202610191400';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -487,7 +487,10 @@ async function readTopLight(img) {
 // OCR often mangles symbols and suffixes ("C NIV.X", "ex", "V"), so the first
 // real word of the name is enough, but it has to be that one: "Alola" alone
 // must not confuse "Raichu et Raichu d'Alola" with "Brindibou et Noadkoko d'Alola".
-const GENERIC_NAME_WORDS = new Set(['mega', 'team', 'dresseur', 'energie', 'obscur', 'brillant', 'alola', 'galar', 'hisui', 'paldea']);
+// Words of the rules text are skipped too: "attaque" is on every card, so it
+// must not stand for "Attaque sournoise des Rocket".
+const GENERIC_NAME_WORDS = new Set(['mega', 'team', 'dresseur', 'energie', 'obscur', 'brillant', 'alola', 'galar', 'hisui', 'paldea',
+  'attaque', 'pokemon', 'carte', 'cartes', 'degats', 'adversaire', 'joueur', 'recherche', 'pioche', 'main', 'tour', 'super']);
 
 function nameOnPhoto(card, topText) {
   const t = fold(topText).replace(/[^a-z0-9]/g, '');
