@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610190915';
+const APP_VERSION = '202610190920';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -1011,6 +1011,7 @@ async function scanOne(file) {
   const img = await loadImage(file);
   $('previewImg').src = img.src;
   $('preview').hidden = false;
+  $('scanLoader').hidden = false;
   setStatus('Recherche de la carte…');
   $('results').innerHTML = '';
   try {
@@ -1044,6 +1045,8 @@ async function scanOne(file) {
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
     $('results').innerHTML = '';
+  } finally {
+    $('scanLoader').hidden = true;
   }
 }
 
@@ -1123,9 +1126,9 @@ async function runBurst() {
     try {
       const img = await loadImage(file);
       row = burstRow(img);
-      row.querySelector('.burst-title').textContent = 'Lecture…';
+      row.querySelector('.burst-title').innerHTML = '<span class="pokeball small" aria-hidden="true"><span class="pokeball-face"></span></span>Analyse…';
       const res = await identifyPhoto(img, (hit) => {
-        row.querySelector('.burst-title').textContent = `Numéro ${hit.num}/${hit.total} : recherche…`;
+        row.querySelector('.burst-title').innerHTML = `<span class="pokeball small" aria-hidden="true"><span class="pokeball-face"></span></span>Numéro ${Number(hit.num)}/${Number(hit.total)} : recherche…`;
       });
       if (res.sure) {
         addFromBurst(res.pick, row);
