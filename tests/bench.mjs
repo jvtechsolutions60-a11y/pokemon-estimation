@@ -77,12 +77,15 @@ console.log(`${sample.length} cartes tirées`);
 // The official image, fetched from here: assets.tcgdex.net's doubled CORS
 // header stops the page from downloading it itself.
 const images = new Map();
+const RELAY = 'https://pokemon-estimation-sync.jvtechsolutions60.workers.dev/img';
 async function officialImage(card) {
   if (!images.has(card.id)) {
     const base = await page.evaluate(async (id) => (await getCard('fr', id)).image || null, card.id);
     if (!base) return null;
-    const res = await fetch(`${base}/high.png`);
-    if (!res.ok) return null;
+    // assets.tcgdex.net sometimes refuses CI: our image relay as a fallback.
+    let res = await fetch(`${base}/high.png`).catch(() => null);
+    if (!res || !res.ok) res = await fetch(`${base.replace('https://assets.tcgdex.net', RELAY)}/high.png`).catch(() => null);
+    if (!res || !res.ok) return null;
     images.set(card.id, Buffer.from(await res.arrayBuffer()).toString('base64'));
   }
   return images.get(card.id);
