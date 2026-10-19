@@ -5,6 +5,11 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import { startSite, openSite } from './helpers.mjs';
 
+// A crash shows up as an annotation: the run's log can't be read from everywhere.
+const crash = (e) => { console.log(`::error::banc d'essai : ${String((e && e.stack) || e).replace(/\n/g, '%0A')}`); process.exit(1); };
+process.on('uncaughtException', crash);
+process.on('unhandledRejection', crash);
+
 // Recognition by image, when an index was built (index-build.mjs).
 let fp = null;
 try {
