@@ -22,7 +22,18 @@ const VARIANTS = {
   normal: 'Normale',
   holo: 'Holo',
   reverse: 'Reverse',
+  // Offered only for cards TCGdex knows in 1st edition (old Wizards sets).
+  firstEdition: '1re édition',
 };
+
+// Cardmarket's figures cover every edition of a card: a 1st edition often
+// sells for much more, so its price is flagged and easy to set by hand.
+function variantOptions(select, hasFirstEdition) {
+  select.innerHTML = '';
+  for (const [k, label] of Object.entries(VARIANTS)) {
+    if (k !== 'firstEdition' || hasFirstEdition) select.appendChild(new Option(label, k));
+  }
+}
 
 // Which Cardmarket figure marketPrice() used, for the label under the price.
 const PRICE_KEY_LABELS = {
@@ -33,7 +44,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610190935';
+const APP_VERSION = '202610190955';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -83,6 +94,7 @@ function sanitizeCollection(list) {
     if (market !== undefined) item.marketPrice = market;
     if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
     if (i.nameEn) item.nameEn = str(i.nameEn);
+    if (i.hasFirstEdition === true || item.variant === 'firstEdition') item.hasFirstEdition = true;
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
     if (date && !Number.isNaN(Date.parse(date))) item.marketDate = date;
@@ -277,6 +289,7 @@ function defaultVariant(card) {
 // different snapshots. Only take a price that is newer than the one we have,
 // so the value stays put until Cardmarket really publishes a new one.
 function applyMarket(item, card, { force = false } = {}) {
+  if (card && card.variants && card.variants.firstEdition) item.hasFirstEdition = true;
   const cm = card && card.pricing && card.pricing.cardmarket;
   const updated = cm && cm.updated ? Date.parse(cm.updated) : NaN;
   const known = item.marketDate ? Date.parse(item.marketDate) : NaN;
@@ -296,7 +309,8 @@ function priceSourceLabel(item) {
   if (typeof item.manualPrice === 'number') return item.priceSource || 'Prix saisi à la main';
   if (typeof item.marketPrice !== 'number') return 'Pas de prix';
   const day = item.marketDate ? ` au ${new Date(item.marketDate).toLocaleDateString('fr-FR')}` : '';
-  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}`;
+  const editions = item.variant === 'firstEdition' ? ', toutes éditions confondues : une 1re édition vaut souvent plus, mets ton prix' : '';
+  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}${editions}`;
 }
 
 function unitPrice(item) {
@@ -847,10 +861,7 @@ function resultCard(card) {
   el.querySelector('.muted').textContent = card.set && card.set.cardCount ? `${setName} · ${displayNumber(card)}` : `n° ${card.localId}`;
 
   const select = el.querySelector('.variant');
-  for (const [k, label] of Object.entries(VARIANTS)) {
-    const opt = new Option(label, k);
-    select.appendChild(opt);
-  }
+  variantOptions(select, Boolean(card.variants && card.variants.firstEdition));
   const priceEl = el.querySelector('.price');
   const button = el.querySelector('button');
 
@@ -859,12 +870,15 @@ function resultCard(card) {
   const refresh = () => {
     const p = full ? marketPrice(full, select.value) : null;
     priceEl.textContent = full ? (p === null ? 'Prix inconnu' : `≈ ${euro.format(p)}`) : '…';
-    el.querySelector('.details').textContent = full ? priceDetails(full, select.value) : '';
+    el.querySelector('.details').textContent = full
+      ? `${priceDetails(full, select.value)}${select.value === 'firstEdition' ? ' · prix toutes éditions confondues' : ''}`
+      : '';
   };
   const ensureFull = async () => {
     if (!full) {
       full = await getCard(lang(), card.id);
       el.querySelector('.muted').textContent = `${full.set.name} · ${displayNumber(full)}`;
+      variantOptions(select, Boolean(full.variants && full.variants.firstEdition));
       select.value = defaultVariant(full);
     }
     refresh();
@@ -1400,6 +1414,7 @@ function addToCollection(card, variant, condition = 'NM') {
       variant,
       condition,
       qty: 1,
+      ...(card.variants && card.variants.firstEdition ? { hasFirstEdition: true } : {}),
     });
     const item = collection[collection.length - 1];
     applyMarket(item, card, { force: true });
@@ -1491,7 +1506,7 @@ function renderCollection() {
     el.querySelector('.price-src').textContent = priceSourceLabel(item);
 
     const variantSel = el.querySelector('.c-variant');
-    for (const [k, label] of Object.entries(VARIANTS)) variantSel.appendChild(new Option(label, k));
+    variantOptions(variantSel, item.hasFirstEdition);
     variantSel.value = item.variant;
     variantSel.addEventListener('change', async () => {
       item.variant = variantSel.value;

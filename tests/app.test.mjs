@@ -208,3 +208,20 @@ test('reconnaissance par l’image : carte inclinée sur un fond chargé, reconn
   assert.match(await page.textContent('#ocrStatus'), /Carchacrok C NIV\.X · Vainqueurs Suprêmes/);
   assert.match(await page.textContent('#results .card.best'), /Correspond à ta photo/);
 }));
+
+test('1re édition : proposée seulement si la carte existe ainsi, prix signalé', () => withPage({}, async (page) => {
+  await page.evaluate(() => searchNumber(9, 62, 'Kabutops'));
+  const card = page.locator('#results .card', { hasText: 'Kabutops' });
+  await page.waitForFunction(() => [...document.querySelectorAll('#results .variant option')].some((o) => o.value === 'firstEdition'));
+  await card.locator('.variant').selectOption('firstEdition');
+  await card.getByRole('button', { name: 'Ajouter' }).click();
+  await page.evaluate(() => { location.hash = '#collection'; });
+  const row = page.locator('.c-variant').first();
+  assert.equal(await row.inputValue(), 'firstEdition');
+  assert.match(await page.locator('.price-src').first().textContent(), /toutes éditions confondues/);
+  // A card that doesn't exist in 1st edition doesn't offer it.
+  await page.evaluate(() => { location.hash = '#scan'; searchNumber(145, 147, 'Carchacrok C NIV.X'); });
+  await page.waitForSelector('#results .card .variant');
+  const values = await page.$$eval('#results .card .variant option', (os) => os.map((o) => o.value));
+  assert.ok(!values.includes('firstEdition'), values.join(','));
+}));

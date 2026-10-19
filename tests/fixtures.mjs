@@ -4,23 +4,25 @@ export const sets = [
   { id: 'pl3', name: 'Vainqueurs Suprêmes', cardCount: { official: 147, total: 153 } },
   { id: 'sm3', name: 'Ombres Ardentes', cardCount: { official: 147, total: 177 } },
   { id: 'cel25cc', name: 'Célébrations Collection Classique', cardCount: { official: 25, total: 25 } },
+  { id: 'base3', name: 'Fossile', cardCount: { official: 62, total: 62 } },
 ];
 
-const card = (id, localId, name, setIndex, pricing) => {
+const card = (id, localId, name, setIndex, pricing, variants = { holo: true }) => {
   const set = sets[setIndex];
-  return { id, localId, name, image: `https://assets.tcgdex.net/fr/x/${set.id}/${localId}`, variants: { holo: true }, set: { id: set.id, name: set.name, cardCount: { official: set.cardCount.official } }, pricing };
+  return { id, localId, name, image: `https://assets.tcgdex.net/fr/x/${set.id}/${localId}`, variants, set: { id: set.id, name: set.name, cardCount: { official: set.cardCount.official } }, pricing };
 };
 
 export const cards = {
   'ecard2-145': card('ecard2-145', '145', 'Énergie super', 0),
   'pl3-145': card('pl3-145', '145', 'Carchacrok C NIV.X', 1, { cardmarket: { idProduct: 278836, updated: '2026-10-17T00:00:00Z', avg7: 20, trend: 18 } }),
   'sm3-145': card('sm3-145', '145', 'Apocyne', 2),
+  'base3-9': card('base3-9', '9', 'Kabutops', 4, { cardmarket: { idProduct: 274, updated: '2026-10-18T00:00:00Z', avg7: 30, trend: 28 } }, { holo: true, firstEdition: true }),
   'cel25cc-CC018': card('cel25cc-CC018', 'CC018', 'Carchacrok C NIV.X', 3, { cardmarket: { idProduct: 576788, updated: '2026-10-18T00:00:00Z', avg7: 7.2, trend: 6.45, 'avg7-holo': 9 } }),
 };
 
 export const englishNames = { 'pl3-145': 'Garchomp C LV.X', 'cel25cc-CC018': 'Garchomp C LV.X' };
 
-const setCards = { ecard2: ['ecard2-145'], pl3: ['pl3-145'], sm3: ['sm3-145'], cel25cc: ['cel25cc-CC018'] };
+const setCards = { ecard2: ['ecard2-145'], pl3: ['pl3-145'], sm3: ['sm3-145'], cel25cc: ['cel25cc-CC018'], base3: ['base3-9'] };
 
 // Route handler for api.tcgdex.net. `failures` maps a path to how many times it answers 503 first.
 export function tcgdex(failures = {}) {
