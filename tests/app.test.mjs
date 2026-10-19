@@ -208,3 +208,20 @@ test('reconnaissance par l’image : carte inclinée sur un fond chargé, reconn
   assert.match(await page.textContent('#ocrStatus'), /Carchacrok C NIV\.X · Vainqueurs Suprêmes/);
   assert.match(await page.textContent('#results .card.best'), /Correspond à ta photo/);
 }));
+
+test('collection sur téléphone : réglages repliés, un toucher les ouvre', () => withPage({}, async (page) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    collection = sanitizeCollection([{ id: 'pl3-145', name: 'Carchacrok C NIV.X', set: 'Rivaux Émergents', number: '145/147', qty: 2, marketPrice: 10 }]);
+    saveCollection();
+    renderCollection();
+    location.hash = '#collection';
+  });
+  const controls = page.locator('#rows .item-controls');
+  assert.equal(await controls.isVisible(), false);
+  await page.click('#rows .item-head');
+  assert.equal(await controls.isVisible(), true);
+  await page.click('#rows .q-plus'); // the row is rebuilt and stays open
+  assert.equal(await page.locator('#rows .q-val').textContent(), '3');
+  assert.equal(await controls.isVisible(), true);
+}));

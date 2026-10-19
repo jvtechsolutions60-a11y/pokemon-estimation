@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191400';
+const APP_VERSION = '202610191500';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -97,8 +97,18 @@ function sanitizeCollection(list) {
 
 try { collection = sanitizeCollection(JSON.parse(safeGet(STORE_KEY))); } catch { collection = []; }
 
+// Asks the browser not to wipe the site's storage when space runs low
+// (Safari otherwise clears it after a few weeks without a visit).
+let persistAsked = false;
+function keepStorage() {
+  if (persistAsked || !collection.length) return;
+  persistAsked = true;
+  navigator.storage?.persist?.().catch(() => {});
+}
+
 function saveCollection({ fromServer = false } = {}) {
   safeSet(STORE_KEY, JSON.stringify(collection));
+  keepStorage();
   if (!fromServer) Sync.changed(collection);
 }
 
@@ -316,6 +326,7 @@ function getWorker() {
       await worker.setParameters({ tessedit_pageseg_mode: '11' });
       return worker;
     })();
+    workerPromise.catch(() => { workerPromise = null; }); // retry on the next photo
   }
   return workerPromise;
 }
@@ -1047,6 +1058,10 @@ async function scanOne(file) {
     $('results').innerHTML = '';
   } finally {
     $('scanLoader').hidden = true;
+    // On a phone the answer lands below the photo: bring it into view.
+    if ($('results').children.length && innerWidth < 760) {
+      $('ocrStatus').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    }
   }
 }
 
@@ -1074,6 +1089,8 @@ function updateBurstUi() {
     : 'Carte bien à plat, numéro du bas lisible';
   $('burstPanel').hidden = !on || !burstStats.total;
   $('preview').hidden = true;
+  $('results').innerHTML = '';
+  setStatus('');
 }
 
 function renderBurstSummary() {
@@ -1163,6 +1180,20 @@ async function runBurst() {
     renderBurstSummary();
   }
   burstRunning = false;
+}
+
+// The reading tools (about 5 MB of fingerprints, the OCR engine) start
+// downloading as soon as the user reaches for the camera, not after the shot.
+let warmedUp = false;
+function warmUpRecognition() {
+  if (warmedUp) return;
+  warmedUp = true;
+  loadFpIndex().catch(() => { warmedUp = false; });
+  getWorker().catch(() => { warmedUp = false; });
+}
+for (const el of [$('drop'), document.querySelector('label[for="photo"]')]) {
+  el?.addEventListener('pointerdown', warmUpRecognition, { passive: true });
+  el?.addEventListener('keydown', warmUpRecognition);
 }
 
 $('photo').addEventListener('change', async (ev) => {
@@ -1435,6 +1466,8 @@ function emptyCollection() {
   return el;
 }
 
+const openItems = new WeakSet(); // rows whose settings are unfolded on a phone
+
 function renderCollection() {
   const list = $('rows');
   list.innerHTML = '';
@@ -1459,13 +1492,14 @@ function renderCollection() {
   for (const item of shown) {
     const unit = unitPrice(item);
     const el = document.createElement('article');
-    el.className = 'item';
+    el.className = openItems.has(item) ? 'item open' : 'item';
     el.innerHTML = `
       ${safeImage(item.image) ? `<img class="item-img" loading="lazy" src="${safeImage(item.image)}" alt="">` : '<div class="item-img"></div>'}
-      <div class="item-head">
-        <div class="item-name"></div>
-        <div class="item-meta"></div>
-      </div>
+      <button type="button" class="item-head" aria-expanded="${openItems.has(item)}">
+        <span class="item-name"></span>
+        <span class="item-meta"></span>
+        <span class="item-more" aria-hidden="true">Modifier</span>
+      </button>
       <div class="item-total"><strong>${euro.format(unit * item.qty)}</strong>${item.qty > 1 ? `<span class="muted">${item.qty} × ${euro.format(unit)}</span>` : ''}</div>
       <div class="item-controls">
         <select class="c-variant" aria-label="Version"></select>
@@ -1538,6 +1572,14 @@ function renderCollection() {
     });
 
     el.querySelector('.cm-open').addEventListener('click', () => openCardmarketDialog(item));
+
+    // On a phone the settings stay folded: a tap on the card opens them.
+    el.querySelector('.item-head').addEventListener('click', () => {
+      const open = !openItems.has(item);
+      if (open) openItems.add(item); else openItems.delete(item);
+      el.classList.toggle('open', open);
+      el.querySelector('.item-head').setAttribute('aria-expanded', String(open));
+    });
 
     el.querySelector('.c-remove').addEventListener('click', () => {
       const i = collection.indexOf(item);
