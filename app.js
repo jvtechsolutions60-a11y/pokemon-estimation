@@ -661,7 +661,7 @@ function loadFpIndex() {
       const [ids, bin] = await Promise.all([get('fp-ids.json').then((r) => r.json()), get('fp-index.bin').then((r) => r.arrayBuffer())]);
       const index = Fingerprint.decodeIndex(bin);
       if (index.length !== ids.length) throw new Error('index incohérent');
-      return { ids, index };
+      return { ids, index, pos: new Map(ids.map((id, i) => [id, i])) };
     })();
     fpIndexPromise.catch(() => { fpIndexPromise = null; }); // retry on the next photo
   }
@@ -717,8 +717,11 @@ async function photoFingerprint(photo) {
 // first, or null when the index can't be loaded or the photo can't be read.
 async function matchByImage(photo) {
   try {
-    const [{ ids, index }, fp] = await Promise.all([loadFpIndex(), photoFingerprint(photo)]);
-    return Fingerprint.closest(index, fp, 20).map((r) => ({ id: ids[r.i], d: r.d }));
+    const [{ ids, index, pos }, fp] = await Promise.all([loadFpIndex(), photoFingerprint(photo)]);
+    const matches = Fingerprint.closest(index, fp, 20).map((r) => ({ id: ids[r.i], d: r.d }));
+    // Distance to any card, to compare the few cards that carry the number read.
+    matches.distanceTo = (id) => (pos.has(id) ? Fingerprint.distance(fp, index[pos.get(id)]) : Infinity);
+    return matches;
   } catch {
     return null;
   }
@@ -959,6 +962,12 @@ async function identifyPhoto(img, onStep = () => {}) {
       // The number and the image agree on a card.
       best = alike[0].id;
       cards = [alike[0], ...cards.filter((c) => c !== alike[0])];
+    } else if (matches && cards.length > 1) {
+      // None of them is among the closest images (worn or holo card, odd
+      // light), but compared with each other one is often far closer.
+      const scored = cards.map((c) => ({ c, d: matches.distanceTo(c.id) })).sort((a, b) => a.d - b.d);
+      cards = scored.map((x) => x.c);
+      if (scored[0].d < Infinity && scored[1].d - scored[0].d >= FP_SURE_GAP) best = cards[0].id;
     } else if (cards.length > 1) {
       ({ cards, best } = await rankByImage(cards, img));
     }
@@ -1070,13 +1079,13 @@ function addFromBurst(card, row) {
   renderBurstSummary();
 }
 
-function burstPicks(row, cards) {
+function burstPicks(row, cards, bestId = null) {
   const pick = row.querySelector('.burst-pick');
   for (const card of cards.slice(0, 5)) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'secondary';
-    b.textContent = `${card.name} · ${card.set ? `${card.set.name} · ${displayNumber(card)}` : ''}`;
+    b.textContent = `${card.id === bestId ? '✓ ' : ''}${card.name} · ${card.set ? `${card.set.name} · ${displayNumber(card)}` : ''}`;
     b.addEventListener('click', () => { row.classList.remove('warn'); addFromBurst(card, row); });
     pick.appendChild(b);
   }
@@ -1113,8 +1122,9 @@ async function runBurst() {
       } else {
         row.classList.add('warn');
         row.querySelector('.burst-title').textContent = 'À vérifier : choisis ta carte';
-        row.querySelector('.burst-sub').textContent = `${res.cards.length} cartes portent le numéro ${res.hit.num}/${res.hit.total}.`;
-        burstPicks(row, res.cards);
+        row.querySelector('.burst-sub').textContent = `${res.cards.length} cartes portent le numéro ${res.hit.num}/${res.hit.total}`
+          + (res.best ? ' : la 1re ressemble le plus à ta photo.' : '.');
+        burstPicks(row, res.cards, res.best);
       }
     } catch (e) {
       if (row) {
