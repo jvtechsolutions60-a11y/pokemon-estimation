@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610190920';
+const APP_VERSION = '202610190935';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -937,13 +937,13 @@ async function identifyPhoto(img, onStep = () => {}) {
   const sets = await getSets(readLang);
   const totals = new Set(sets.flatMap((s) => (s.cardCount ? [s.cardCount.official, s.cardCount.total] : [])));
 
-  // A reading is confirmed when a card with that number has the name read at
-  // the top of the photo: a digit misread then can't add the wrong card.
+  // A reading is confirmed when a card with that number has its name on the
+  // photo (title, or attacks text): a digit misread then can't add the wrong card.
   const named = async (guess) => {
     for (const set of setsWithTotal(sets, guess.total)) {
       try {
         const full = await getSetFull(readLang, set.id);
-        if ((full.cards || []).some((c) => parseInt(c.localId, 10) === guess.num && nameOnPhoto(c, text.top))) return true;
+        if ((full.cards || []).some((c) => parseInt(c.localId, 10) === guess.num && nameOnPhoto(c, text.all))) return true;
       } catch { /* set unavailable */ }
     }
     return false;
@@ -959,22 +959,19 @@ async function identifyPhoto(img, onStep = () => {}) {
     }
     return false;
   };
-  const hits = text.top.trim() ? await readNumberHits(img, accept) : await readNumberHits(img, async () => true);
+  const hits = text.all.trim() ? await readNumberHits(img, accept) : await readNumberHits(img, async () => true);
   const hit = confirmed || numberGuesses(hits, totals)[0] || hits[0] || null;
   if (hit) {
     onStep(hit, detected);
     const all = await findByNumber(readLang, hit.num, hit.total);
     let ranked = rankByName(all, text.top);
+    // The attacks often name the Pokémon too ("attachée à Lokhlass"); with
+    // several cards of that name, the image still has to pick one.
+    if (!ranked.named && all.length) ranked = rankByName(all, text.all);
+    // Names printed in white on a dark band vanish in the first reading.
     if (!ranked.named && all.length) {
       const light = await readTopLight(img).catch(() => '');
-      ranked = rankByName(all, `${text.top}\n${light}`);
-    }
-    // Last resort: the attacks often name the Pokémon ("attachée à Démolosse").
-    // Weaker proof, so it only counts when the image picks that same card.
-    let nameFromBody = false;
-    if (!ranked.named && all.length) {
-      ranked = rankByName(all, text.all);
-      nameFromBody = ranked.named;
+      ranked = rankByName(all, `${text.all}\n${light}`);
     }
     let { cards } = ranked;
     let best = null;
@@ -996,7 +993,7 @@ async function identifyPhoto(img, onStep = () => {}) {
     }
     const others = ranked.others.filter((c) => !cards.includes(c));
     // Added without asking only when the name matches too, and no set is missing.
-    const sure = ranked.named && !nameDisagrees && !all.incomplete && (nameFromBody ? Boolean(best) : (cards.length === 1 || Boolean(best)));
+    const sure = ranked.named && !nameDisagrees && !all.incomplete && (cards.length === 1 || Boolean(best));
     const pick = sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null;
     if (cards.length || !matches) return { hit, detected, cards, others, best, sure, incomplete: all.incomplete, pick };
   }
