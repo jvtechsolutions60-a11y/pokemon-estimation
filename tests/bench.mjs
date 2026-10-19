@@ -9,7 +9,7 @@ import { startSite, openSite } from './helpers.mjs';
 let fp = null;
 try {
   const index = JSON.parse(await readFile(new URL('./fp-index.json', import.meta.url), 'utf8'))
-    .map((e) => ({ ...e, hash: BigInt(`0x${e.h}`), grid: Float32Array.from(e.g) }));
+    .map((e) => ({ ...e, hash: BigInt(`0x${e.h}`), grid: Float32Array.from(e.g), fine: Float32Array.from(e.f) }));
   fp = { index, ...(await import('./fp-node.mjs')), ...(await import('./fingerprint.mjs')) };
   console.log(`index d'empreintes : ${index.length} cartes`);
 } catch (e) {

@@ -67,11 +67,16 @@ export function hamming(a, b) {
   return n;
 }
 
-// 0 = identical. Hash and colour weigh about the same.
-export function distance(fa, fb) {
+const rms = (a, b) => {
   let d = 0;
-  for (let i = 0; i < fa.grid.length; i++) d += (fa.grid[i] - fb.grid[i]) ** 2;
-  return hamming(fa.hash, fb.hash) / 32 + Math.sqrt(d / fa.grid.length) / 1.4;
+  for (let i = 0; i < a.length; i++) d += (a[i] - b[i]) ** 2;
+  return Math.sqrt(d / a.length);
+};
+
+// 0 = identical. Tuned on real photos (holo glare, sleeves, busy backgrounds):
+// the fine 8×11 colour grid separates cards best, the shape hash helps a little.
+export function distance(fa, fb) {
+  return (0.5 * hamming(fa.hash, fb.hash)) / 32 + rms(fa.fine, fb.fine) / 1.4;
 }
 
 // Finds the card in a photo: the large region that differs from the colour
