@@ -23,12 +23,13 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: node index-build.mjs fp-index.json
+      - run: node index-build.mjs
       - name: Publier sur la branche empreintes
         run: |
           dir="$RUNNER_TEMP/out"
           git fetch origin empreintes && git worktree add "$dir" origin/empreintes || git worktree add --orphan -b empreintes "$dir"
-          cp fp-index.json "$dir/fp-index.json"
+          rm -f "$dir/fp-index.json"
+          cp fp-index.bin fp-ids.json "$dir/"
           cd "$dir"
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"

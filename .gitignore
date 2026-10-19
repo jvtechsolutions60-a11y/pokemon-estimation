@@ -1,3 +1,4 @@
 node_modules
 tests/bench-results/
-tests/fp-index.json
+tests/fp-index.*
+tests/fp-ids.json

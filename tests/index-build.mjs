@@ -1,10 +1,11 @@
 // Builds the fingerprint index of every French card that has an official image.
-// Usage: node index-build.mjs [out=fp-index.json]
+// Usage: node index-build.mjs [dir=.]  →  fp-index.bin + fp-ids.json
 import { writeFile } from 'node:fs/promises';
-import { fingerprintCard } from './fp-node.mjs';
+import { join } from 'node:path';
+import { FP, fingerprintCard } from './fp-node.mjs';
 
 const API = 'https://api.tcgdex.net/v2/fr';
-const OUT = process.argv[2] || 'fp-index.json';
+const DIR = process.argv[2] || '.';
 const POCKET = /^(?:[AB]\d+[a-z]?|P-[A-Z])-/;
 
 async function get(url, as = 'json') {
@@ -21,22 +22,22 @@ async function get(url, as = 'json') {
 
 const cards = (await get(`${API}/cards`)).filter((c) => c.image && !POCKET.test(c.id));
 console.log(`${cards.length} cartes avec image`);
-const index = [];
-let done = 0;
+const done = new Map();
 let failed = 0;
 const queue = [...cards];
 await Promise.all(Array.from({ length: 24 }, async () => {
   while (queue.length) {
     const c = queue.shift();
     const buf = await get(`${c.image}/low.webp`, 'buffer');
-    if (buf) {
-      try {
-        const fp = await fingerprintCard(buf);
-        index.push({ id: c.id, name: c.name, n: c.localId, h: fp.hash.toString(16).padStart(16, '0'), g: [...fp.grid].map((x) => Math.round(x * 100) / 100), f: [...fp.fine].map((x) => Math.round(x * 50) / 50) });
-      } catch { failed++; }
-    } else failed++;
-    if (++done % 1000 === 0) console.log(`${done}/${cards.length}`);
+    try {
+      if (!buf) throw new Error('absent');
+      done.set(c.id, await fingerprintCard(buf));
+    } catch { failed++; }
+    if ((done.size + failed) % 2000 === 0) console.log(`${done.size + failed}/${cards.length}`);
   }
 }));
-console.log(`index : ${index.length} cartes, ${failed} échecs`);
-await writeFile(OUT, JSON.stringify(index));
+// Stable order (by id) so a week without new cards gives the same file.
+const ids = [...done.keys()].sort();
+await writeFile(join(DIR, 'fp-index.bin'), FP.encodeIndex(ids.map((id) => done.get(id))));
+await writeFile(join(DIR, 'fp-ids.json'), JSON.stringify(ids));
+console.log(`index : ${ids.length} cartes, ${failed} échecs`);

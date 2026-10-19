@@ -5,12 +5,14 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import { startSite, openSite } from './helpers.mjs';
 
-// Recognition by image (prototype), when an index was built (index-build.mjs).
+// Recognition by image, when an index was built (index-build.mjs).
 let fp = null;
 try {
-  const index = JSON.parse(await readFile(new URL('./fp-index.json', import.meta.url), 'utf8'))
-    .map((e) => ({ ...e, hash: BigInt(`0x${e.h}`), grid: Float32Array.from(e.g), fine: Float32Array.from(e.f) }));
-  fp = { index, ...(await import('./fp-node.mjs')), ...(await import('./fingerprint.mjs')) };
+  const ids = JSON.parse(await readFile(new URL('./fp-ids.json', import.meta.url), 'utf8'));
+  const mod = await import('./fp-node.mjs');
+  const index = mod.FP.decodeIndex(await readFile(new URL('./fp-index.bin', import.meta.url)));
+  const names = JSON.parse(await readFile(new URL('./fp-names.json', import.meta.url), 'utf8').catch(() => '{}'));
+  fp = { ids, index, names, ...mod };
   console.log(`index d'empreintes : ${index.length} cartes`);
 } catch (e) {
   console.log(`pas d'index d'empreintes (${e.message}) : reconnaissance par image non testée`);
@@ -18,58 +20,24 @@ try {
 
 async function byImage(buf, card, hit, mode) {
   // A clean scan is already just the card; a photo needs the card found first.
-  const qs = mode === 'scan' ? [await fp.fingerprintCard(buf)] : await fp.fingerprintPhotoAll(buf);
-  const ranked = fp.index.map((e) => ({ e, d: Math.min(...qs.map((q) => fp.distance(q, e))) })).sort((a, b) => a.d - b.d).slice(0, 20);
-  const pos = ranked.findIndex((r) => r.e.id === card.id);
+  const q = mode === 'scan' ? await fp.fingerprintCard(buf) : await fp.fingerprintPhoto(buf);
+  const ranked = fp.FP.closest(fp.index, q, 20).map((r) => ({ id: fp.ids[r.i], d: r.d }));
+  const pos = ranked.findIndex((r) => r.id === card.id);
+  const num = (id) => parseInt(id.split('-').pop(), 10);
   // Hybrid: among the 20 closest images, the one whose number was read.
-  const withNumber = hit && ranked.find((r) => parseInt(r.e.n, 10) === hit.num);
-  const hybrid = withNumber ? withNumber.e.id : ranked[0].e.id;
+  const withNumber = hit && ranked.find((r) => num(r.id) === hit.num);
+  const hybrid = withNumber ? withNumber.id : ranked[0].id;
+  const gap = ranked[1].d - ranked[0].d;
   return {
     imgRank: pos, // -1 = not in the 20 closest
     imgTop1: pos === 0,
     imgTop5: pos >= 0 && pos < 5,
-    imgSameName: ranked[0].e.name === card.name,
-    imgGap: Math.round((ranked[1].d - ranked[0].d) * 1000) / 1000,
-    imgFirst: ranked[0].e.id,
+    imgSure: gap >= 0.1,
+    imgGap: Math.round(gap * 1000) / 1000,
+    imgFirst: ranked[0].id,
     hybridOk: hybrid === card.id,
   };
 }
-
-// Any crash shows up as an annotation on the run page.
-const report = (e) => { console.log(`::error title=Banc d'essai::${String(e && e.stack || e).replace(/\n/g, '%0A')}`); process.exit(1); };
-process.on('uncaughtException', report);
-process.on('unhandledRejection', report);
-
-const COUNT = Number(process.argv[2] || 100);
-const SEED = Number(process.argv[3] || 1);
-const OUT = new URL('./bench-results/', import.meta.url);
-
-const site = await startSite();
-const { browser, page, errors } = await openSite(site);
-
-// Picks the cards: sets spread over the whole history, a few cards each.
-const sample = await page.evaluate(async ({ count, seed }) => {
-  let s = seed >>> 0;
-  const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-  const sets = (await getSets('fr')).filter((x) => x.cardCount && x.cardCount.official >= 10 && !/classi|promo|mcdonald/i.test(x.name) && !/^(?:[AB]\d+[a-z]?|P-[A-Z])$/.test(x.id));
-  const perSet = 4;
-  const nSets = Math.ceil(count / perSet);
-  const picked = [];
-  for (let i = 0; i < nSets; i++) {
-    const set = sets[Math.floor((i + rand()) * sets.length / nSets)];
-    try {
-      const full = await getJSON(`${API}/fr/sets/${set.id}`);
-      const pool = (full.cards || []).filter((c) => /^\d+$/.test(c.localId) && c.image);
-      for (let k = 0; k < perSet && pool.length; k++) {
-        const c = pool.splice(Math.floor(rand() * pool.length), 1)[0];
-        picked.push({ id: c.id, name: c.name, set: set.name, setId: set.id, num: parseInt(c.localId, 10), total: set.cardCount.official });
-      }
-    } catch { /* set unavailable: skip */ }
-  }
-  return picked.slice(0, count);
-}, { count: COUNT, seed: SEED });
-
-console.log(`${sample.length} cartes tirées`);
 
 // The official image, fetched from here: assets.tcgdex.net's doubled CORS
 // header stops the page from downloading it itself.
@@ -189,7 +157,8 @@ for (const mode of ['scan', 'photo']) {
     ms: Math.round(ok.reduce((a, r) => a + r.ms, 0) / (ok.length || 1)),
     imgTop1: ok.filter((r) => r.imgTop1).length,
     imgTop5: ok.filter((r) => r.imgTop5).length,
-    imgSameName: ok.filter((r) => r.imgSameName).length,
+    imgSure: ok.filter((r) => r.imgSure).length,
+    imgSureWrong: ok.filter((r) => r.imgSure && !r.imgTop1).length,
     hybridOk: ok.filter((r) => r.hybridOk).length,
   };
 }
@@ -205,7 +174,8 @@ if (fp) {
   md += `| **Par l'image** (${fp.index.length} cartes connues) | | |\n`;
   line('Bonne carte en 1er', 'imgTop1');
   line('Bonne carte dans les 5 premières', 'imgTop5');
-  line('1re carte du bon nom (même illustration)', 'imgSameName');
+  line('Sûre (nettement devant la 2e)', 'imgSure');
+  line('Sûre mais **fausse**', 'imgSureWrong');
   line('Image + numéro lu', 'hybridOk');
 }
 md += '\n## Échecs\n\n| Mode | Carte | Extension | Attendu | Lu | Dans la liste | Choix auto |\n|---|---|---|---|---|---|---|\n';

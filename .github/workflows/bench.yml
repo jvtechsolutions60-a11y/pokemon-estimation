@@ -41,9 +41,11 @@ jobs:
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
-          path: tests/fp-index.json
-          key: fp-index-${{ hashFiles('tests/fingerprint.mjs', 'tests/fp-node.mjs', 'tests/index-build.mjs') }}-${{ steps.week.outputs.week }}
-      - run: test -f fp-index.json || node index-build.mjs fp-index.json
+          path: |
+            tests/fp-index.bin
+            tests/fp-ids.json
+          key: fp-index-${{ hashFiles('fingerprint.js', 'tests/fp-node.mjs', 'tests/index-build.mjs') }}-${{ steps.week.outputs.week }}
+      - run: test -f fp-index.bin || node index-build.mjs
       - run: node bench.mjs "${{ inputs.cards }}" "${{ inputs.seed }}"
       - run: cat bench-results/RESULTATS.md >> "$GITHUB_STEP_SUMMARY"
       - name: Publier les résultats sur la branche banc-essai

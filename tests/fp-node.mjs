@@ -1,6 +1,10 @@
-// Node side of the prototype: decodes images with sharp and builds fingerprints.
+// Node side of image recognition: decodes images with sharp, then uses the
+// same fingerprint code as the site (../fingerprint.js).
+import { createRequire } from 'node:module';
 import sharp from 'sharp';
-import { FP_W, FP_H, GRID_W, GRID_H, phash, colorGrid, findCard, findCardByEdges } from './fingerprint.mjs';
+
+const FP = createRequire(import.meta.url)('../fingerprint.js');
+export { FP };
 
 async function raw(img, w, h) {
   const { data } = await img.clone().resize(w, h, { fit: 'fill' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -9,38 +13,25 @@ async function raw(img, w, h) {
 
 // An official image: the card fills it.
 export async function fingerprintCard(buf) {
-  const img = sharp(buf);
-  return { hash: phash(await raw(img, FP_W, FP_H)), grid: colorGrid(await raw(img, GRID_W, GRID_H)), fine: colorGrid(await raw(img, 8, 11), 88) };
+  return FP.fingerprint(await raw(sharp(buf), FP.CARD_W, FP.CARD_H));
 }
 
-// A photo: find the card first, then fingerprint that part only. Cards are
-// rarely shot perfectly straight, so a few small tilts are tried.
-export async function fingerprintPhoto(buf, method = 'edges') {
+// A photo: find the card (trying a few tilts), then fingerprint that part only.
+export async function fingerprintPhoto(buf) {
   const base = await sharp(buf).rotate().toBuffer(); // honours the phone's orientation flag
   let best = null;
-  for (const angle of method === 'edges' ? [0, -3, 3, -6, 6] : [0]) {
+  for (const angle of FP.TILTS) {
     const img = sharp(angle ? await sharp(base).rotate(angle, { background: '#000' }).toBuffer() : base);
     const meta = await img.metadata();
-    const W = method === 'edges' ? 160 : 300;
+    const W = 160;
     const H = Math.round((meta.height * W) / meta.width);
-    const pixels = await raw(img, W, H);
-    const box = method === 'edges' ? findCardByEdges(pixels, W, H) : findCard(pixels, W, H);
-    if (!best || (box.score ?? 0) > (best.box.score ?? 0)) best = { img, meta, W, box };
+    const box = FP.findCard(await raw(img, W, H), W, H);
+    if (!best || box.score > best.box.score) best = { img, meta, k: meta.width / W, box };
   }
-  const { img, meta, W, box } = best;
-  const k = meta.width / W;
-  const region = {
-    left: Math.max(0, Math.round(box.x * k)),
-    top: Math.max(0, Math.round(box.y * k)),
-    width: Math.min(meta.width - Math.round(box.x * k), Math.round(box.w * k)),
-    height: Math.min(meta.height - Math.round(box.y * k), Math.round(box.h * k)),
-  };
+  const { img, meta, k, box } = best;
+  const left = Math.max(0, Math.round(box.x * k));
+  const top = Math.max(0, Math.round(box.y * k));
+  const region = { left, top, width: Math.min(meta.width - left, Math.round(box.w * k)), height: Math.min(meta.height - top, Math.round(box.h * k)) };
   const card = sharp(await img.clone().extract(region).toBuffer());
-  return { box: region, crop: card, hash: phash(await raw(card, FP_W, FP_H)), grid: colorGrid(await raw(card, GRID_W, GRID_H)), fine: colorGrid(await raw(card, 8, 11), 88) };
-}
-
-// Both ways of finding the card; the caller keeps, for each known card, the
-// closer of the two (the wrong crop simply matches nothing well).
-export async function fingerprintPhotoAll(buf) {
-  return [await fingerprintPhoto(buf, "edges")];
+  return { box: region, crop: card, ...FP.fingerprint(await raw(card, FP.CARD_W, FP.CARD_H)) };
 }
