@@ -3,9 +3,10 @@
 Petite appli web (100 % statique) pour estimer la valeur d'une collection de cartes Pokémon :
 
 1. on prend la carte en photo ;
-2. le numéro (ex. `4/102`) est lu dans le bas de la carte avec [Tesseract.js](https://tesseract.projectnaptha.com/), directement dans le navigateur ;
-3. la carte est retrouvée via l'API gratuite [TCGdex](https://tcgdex.dev) (noms en français) avec son prix Cardmarket en euros ;
-4. on l'ajoute à sa collection : état, version (normale / holo / reverse), quantité, total, export CSV.
+2. la carte est reconnue à son image : le navigateur repère la carte dans la photo et compare son empreinte (formes + couleurs, `fingerprint.js`) à celles de toutes les images officielles, calculées chaque semaine par GitHub Actions (branche `empreintes`) ;
+3. si l'image ne suffit pas, le numéro (ex. `4/102`) est lu dans le bas de la carte avec [Tesseract.js](https://tesseract.projectnaptha.com/), directement dans le navigateur, et départage les cartes qui se ressemblent ;
+4. la carte est retrouvée via l'API gratuite [TCGdex](https://tcgdex.dev) (noms en français) avec son prix Cardmarket en euros ;
+5. on l'ajoute à sa collection : état, version (normale / holo / reverse), quantité, total, export CSV.
 
 Si la lecture du numéro échoue, on peut le saisir à la main ou chercher par nom.
 

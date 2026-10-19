@@ -163,3 +163,48 @@ test('images officielles : passage par notre serveur quand le CORS de TCGdex est
     await browser.close();
   }
 });
+
+test('reconnaissance par l’image : carte inclinée sur un fond chargé, reconnue sans lire le numéro', () => withPage({}, async (page) => {
+  // Four made-up card images stand in for the official ones, and a photo of
+  // one of them, tilted, on a busy background.
+  const ids = ['ecard2-145', 'pl3-145', 'sm3-145', 'cel25cc-CC018'];
+  const { index, photo } = await page.evaluate((ids) => {
+    let seed = 7;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const color = () => `rgb(${rand() * 255 | 0},${rand() * 255 | 0},${rand() * 255 | 0})`;
+    const cards = ids.map(() => {
+      const c = document.createElement('canvas');
+      c.width = 252; c.height = 352;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#e8c33a'; ctx.fillRect(0, 0, 252, 352);
+      ctx.fillStyle = color(); ctx.fillRect(10, 10, 232, 332);
+      for (let k = 0; k < 14; k++) {
+        ctx.fillStyle = color();
+        ctx.beginPath();
+        ctx.arc(20 + rand() * 212, 20 + rand() * 312, 10 + rand() * 50, 0, 7);
+        ctx.fill();
+      }
+      return c;
+    });
+    const fps = cards.map((c) => {
+      const s = document.createElement('canvas');
+      s.width = Fingerprint.CARD_W; s.height = Fingerprint.CARD_H;
+      s.getContext('2d').drawImage(c, 0, 0, s.width, s.height);
+      return Fingerprint.fingerprint(s.getContext('2d').getImageData(0, 0, s.width, s.height).data, 4);
+    });
+    const p = document.createElement('canvas');
+    p.width = 900; p.height = 1200;
+    const ctx = p.getContext('2d');
+    for (let k = 0; k < 300; k++) { ctx.fillStyle = color(); ctx.fillRect(rand() * 900, rand() * 1200, 20 + rand() * 120, 20 + rand() * 120); }
+    ctx.translate(450, 620);
+    ctx.rotate((4 * Math.PI) / 180);
+    ctx.drawImage(cards[1], -270, -377, 540, 754);
+    return { index: Array.from(Fingerprint.encodeIndex(fps)), photo: p.toDataURL('image/jpeg', 0.9).split(',')[1] };
+  }, ids);
+  await page.route(/@empreintes\/fp-index\.bin$/, (r) => r.fulfill({ body: Buffer.from(index), contentType: 'application/octet-stream' }));
+  await page.route(/@empreintes\/fp-ids\.json$/, (r) => r.fulfill({ json: ids }));
+  await page.setInputFiles('#photo', { name: 'carte.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(photo, 'base64') });
+  await page.waitForFunction(() => /Carte reconnue/.test(document.getElementById('ocrStatus').textContent), null, { timeout: 30000 });
+  assert.match(await page.textContent('#ocrStatus'), /Carchacrok C NIV\.X · Vainqueurs Suprêmes/);
+  assert.match(await page.textContent('#results .card.best'), /Correspond à ta photo/);
+}));

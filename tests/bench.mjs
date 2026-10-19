@@ -32,7 +32,7 @@ async function byImage(buf, card, hit, mode) {
     imgRank: pos, // -1 = not in the 20 closest
     imgTop1: pos === 0,
     imgTop5: pos >= 0 && pos < 5,
-    imgSure: gap >= 0.1,
+    imgSure: gap >= 0.1 && ranked[0].d < 0.9, // same rule as the site
     imgGap: Math.round(gap * 1000) / 1000,
     imgFirst: ranked[0].id,
     hybridOk: hybrid === card.id,

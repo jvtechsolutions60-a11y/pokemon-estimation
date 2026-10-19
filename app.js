@@ -634,6 +634,106 @@ async function rankByImage(cards, photo) {
   }
 }
 
+// ---------- Recognition by image ----------
+//
+// Every official card image has a fingerprint (shapes + colours, see
+// fingerprint.js), computed once a week by GitHub Actions and published on the
+// "empreintes" branch. The photo's fingerprint is computed here, on the phone:
+// the photo itself never leaves it.
+
+const FP_BASE = 'https://cdn.jsdelivr.net/gh/jvtechsolutions60-a11y/pokemon-estimation@empreintes/';
+const FP_TIMEOUT_MS = 60000; // about 5 MB, on a phone connection
+// Tested on 209 real photos: when the best card is this close to the photo
+// and this far ahead of the second one, it was right every time.
+const FP_SURE_GAP = 0.1;
+const FP_SURE_MAX = 0.9;
+const FP_PROBE_W = 160; // width of the small copy the card is looked for in
+
+let fpIndexPromise = null;
+function loadFpIndex() {
+  if (!fpIndexPromise) {
+    fpIndexPromise = (async () => {
+      const get = async (file) => {
+        const res = await fetch(FP_BASE + file, { signal: AbortSignal.timeout(FP_TIMEOUT_MS) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res;
+      };
+      const [ids, bin] = await Promise.all([get('fp-ids.json').then((r) => r.json()), get('fp-index.bin').then((r) => r.arrayBuffer())]);
+      const index = Fingerprint.decodeIndex(bin);
+      if (index.length !== ids.length) throw new Error('index incohérent');
+      return { ids, index };
+    })();
+    fpIndexPromise.catch(() => { fpIndexPromise = null; }); // retry on the next photo
+  }
+  return fpIndexPromise;
+}
+
+// RGB pixels of the photo rotated by `angle` degrees (on a black background
+// that grows to fit, like the server's), drawn at w×h; when `box` is given,
+// only that region of the rotated photo (in w×h pixels of the whole).
+function rotatedPixels(photo, angle, w, h, box = null, outW = w, outH = h) {
+  // Drawn 4× larger then averaged down: a plain downscale skips pixels.
+  const canvas = document.createElement('canvas');
+  canvas.width = outW * 4;
+  canvas.height = outH * 4;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const b = box || { x: 0, y: 0, w, h };
+  ctx.scale(canvas.width / b.w, canvas.height / b.h);
+  ctx.translate(-b.x + w / 2, -b.y + h / 2);
+  ctx.rotate((angle * Math.PI) / 180);
+  const rad = Math.abs((angle * Math.PI) / 180);
+  // Size of the unrotated photo in the w×h frame.
+  const pw = photo.naturalWidth;
+  const ph = photo.naturalHeight;
+  const k = w / (pw * Math.cos(rad) + ph * Math.sin(rad));
+  ctx.drawImage(photo, (-pw * k) / 2, (-ph * k) / 2, pw * k, ph * k);
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  return Fingerprint.boxResize(data, canvas.width, canvas.height, outW, outH, 4);
+}
+
+// Fingerprint of the card in the photo: the card is found first, trying a few
+// tilts, so the background doesn't count.
+async function photoFingerprint(photo) {
+  let best = null;
+  for (const angle of Fingerprint.TILTS) {
+    const rad = Math.abs((angle * Math.PI) / 180);
+    const pw = photo.naturalWidth;
+    const ph = photo.naturalHeight;
+    const rw = pw * Math.cos(rad) + ph * Math.sin(rad);
+    const rh = pw * Math.sin(rad) + ph * Math.cos(rad);
+    const w = FP_PROBE_W;
+    const h = Math.round((rh * w) / rw);
+    const box = Fingerprint.findCard(rotatedPixels(photo, angle, w, h), w, h);
+    if (!best || box.score > best.box.score) best = { angle, w, h, box };
+    await new Promise((r) => setTimeout(r, 0)); // keep the page responsive
+  }
+  const { angle, w, h, box } = best;
+  return Fingerprint.fingerprint(rotatedPixels(photo, angle, w, h, box, Fingerprint.CARD_W, Fingerprint.CARD_H));
+}
+
+// The 20 official cards that look most like the photo: [{ id, d }], best
+// first, or null when the index can't be loaded or the photo can't be read.
+async function matchByImage(photo) {
+  try {
+    const [{ ids, index }, fp] = await Promise.all([loadFpIndex(), photoFingerprint(photo)]);
+    return Fingerprint.closest(index, fp, 20).map((r) => ({ id: ids[r.i], d: r.d }));
+  } catch {
+    return null;
+  }
+}
+
+function imageIsSure(matches) {
+  return Boolean(matches && matches.length > 1 && matches[0].d < FP_SURE_MAX && matches[1].d - matches[0].d >= FP_SURE_GAP);
+}
+
+// Cards of `list` that also look like the photo, closest first.
+function alsoLookAlike(list, matches) {
+  const rank = new Map(matches.map((m, i) => [m.id, i]));
+  return list.filter((c) => rank.has(c.id)).sort((a, b) => rank.get(a.id) - rank.get(b.id));
+}
+
 // ---------- UI: search ----------
 
 function setStatus(msg) {
@@ -799,11 +899,27 @@ const LANG_NAMES = { fr: 'français', en: 'anglais', de: 'allemand', it: 'italie
 // Reads one photo: number, language, the matching cards and, when it is clear,
 // which of them is on the photo. `sure` means it can be added without asking.
 async function identifyPhoto(img, onStep = () => {}) {
+  const imageMatch = matchByImage(img);
+  const cardLang = lang();
+
+  // 1. The image alone, when one official card is clearly the closest.
+  const matches = await imageMatch;
+  if (imageIsSure(matches)) {
+    const card = await getCard(cardLang, matches[0].id).catch(() => null);
+    if (card) {
+      const total = card.set && card.set.cardCount ? card.set.cardCount.official : 0;
+      const hit = { num: parseInt(card.localId, 10), total };
+      if (hit.num && total) onStep(hit, null);
+      return { hit, detected: null, cards: [card], best: card.id, sure: true, byImage: true, pick: card };
+    }
+  }
+
+  // 2. The number read on the card, with the image to choose between editions.
   const text = await readCardText(img).catch(() => ({ top: '', all: '' }));
   const detected = detectLanguage(text.all);
   if (detected) $('lang').value = detected;
-  const cardLang = lang();
-  const sets = await getSets(cardLang);
+  const readLang = lang();
+  const sets = await getSets(readLang);
   const totals = new Set(sets.flatMap((s) => (s.cardCount ? [s.cardCount.official, s.cardCount.total] : [])));
 
   // A reading is confirmed when a card with that number has the name read at
@@ -811,7 +927,7 @@ async function identifyPhoto(img, onStep = () => {}) {
   const named = async (guess) => {
     for (const set of setsWithTotal(sets, guess.total)) {
       try {
-        const full = await getSetFull(cardLang, set.id);
+        const full = await getSetFull(readLang, set.id);
         if ((full.cards || []).some((c) => parseInt(c.localId, 10) === guess.num && nameOnPhoto(c, text.top))) return true;
       } catch { /* set unavailable */ }
     }
@@ -830,23 +946,40 @@ async function identifyPhoto(img, onStep = () => {}) {
   };
   const hits = text.top.trim() ? await readNumberHits(img, accept) : await readNumberHits(img, async () => true);
   const hit = confirmed || numberGuesses(hits, totals)[0] || hits[0] || null;
-  if (!hit) return { hit, detected, cards: [], best: null, sure: false };
-  onStep(hit, detected);
-  const all = await findByNumber(cardLang, hit.num, hit.total);
-  const ranked = rankByName(all, text.top);
-  let { cards } = ranked;
-  let best = null;
-  if (cards.length > 1) ({ cards, best } = await rankByImage(cards, img));
-  // Added without asking only when the name matches too, and no set is missing.
-  const sure = ranked.named && !all.incomplete && (cards.length === 1 || Boolean(best));
-  return { hit, detected, cards, others: ranked.others, best, sure, incomplete: all.incomplete, pick: sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null };
+  if (hit) {
+    onStep(hit, detected);
+    const all = await findByNumber(readLang, hit.num, hit.total);
+    const ranked = rankByName(all, text.top);
+    let { cards } = ranked;
+    let best = null;
+    const alike = matches ? alsoLookAlike([...cards, ...ranked.others], matches) : [];
+    // The image may prefer a card whose name wasn't read: shown first, never added without asking.
+    const nameDisagrees = alike.length > 0 && ranked.others.includes(alike[0]);
+    if (alike.length) {
+      // The number and the image agree on a card.
+      best = alike[0].id;
+      cards = [alike[0], ...cards.filter((c) => c !== alike[0])];
+    } else if (cards.length > 1) {
+      ({ cards, best } = await rankByImage(cards, img));
+    }
+    const others = ranked.others.filter((c) => !cards.includes(c));
+    // Added without asking only when the name matches too, and no set is missing.
+    const sure = ranked.named && !nameDisagrees && !all.incomplete && (cards.length === 1 || Boolean(best));
+    const pick = sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null;
+    if (cards.length || !matches) return { hit, detected, cards, others, best, sure, incomplete: all.incomplete, pick };
+  }
+
+  // 3. Neither is sure: the closest-looking cards, to choose from.
+  if (!matches) return { hit, detected, cards: [], best: null, sure: false };
+  const lookalikes = (await Promise.all(matches.slice(0, 5).map((m) => getCard(readLang, m.id).catch(() => null)))).filter(Boolean);
+  return { hit, detected, cards: lookalikes, best: null, sure: false, lookalikes: true };
 }
 
 async function scanOne(file) {
   const img = await loadImage(file);
   $('previewImg').src = img.src;
   $('preview').hidden = false;
-  setStatus('Lecture de la carte…');
+  setStatus('Recherche de la carte…');
   $('results').innerHTML = '';
   try {
     const res = await identifyPhoto(img, (hit, detected) => {
@@ -856,6 +989,19 @@ async function scanOne(file) {
       setStatus(`Numéro lu : ${hit.num}/${hit.total}${langLabel}. Corrige si besoin.`);
       $('results').innerHTML = '<p class="muted">Recherche et comparaison avec les images officielles…</p>';
     });
+    if (res.byImage) {
+      const c = res.pick;
+      setStatus(`Carte reconnue : ${c.name}${c.set ? ` · ${c.set.name}` : ''}. Pas la bonne ? Saisis le numéro ci-dessous.`);
+      renderResults(res.cards, res.best);
+      return;
+    }
+    if (res.lookalikes) {
+      setStatus(res.hit
+        ? `Aucune carte ${res.hit.num}/${res.hit.total} : voici les cartes qui ressemblent le plus à ta photo. Sinon, corrige le numéro.`
+        : 'Numéro illisible : voici les cartes qui ressemblent le plus à ta photo. Sinon, saisis le numéro ci-dessous.');
+      renderResults(res.cards);
+      return;
+    }
     if (!res.hit) {
       const langLabel = res.detected ? ` · langue détectée : ${LANG_NAMES[res.detected] || res.detected}` : '';
       setStatus(`Numéro illisible${langLabel}. Saisis-le ci-dessous (ex. 4 / 102) ou cherche par nom.`);
@@ -924,6 +1070,18 @@ function addFromBurst(card, row) {
   renderBurstSummary();
 }
 
+function burstPicks(row, cards) {
+  const pick = row.querySelector('.burst-pick');
+  for (const card of cards.slice(0, 5)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'secondary';
+    b.textContent = `${card.name} · ${card.set ? `${card.set.name} · ${displayNumber(card)}` : ''}`;
+    b.addEventListener('click', () => { row.classList.remove('warn'); addFromBurst(card, row); });
+    pick.appendChild(b);
+  }
+}
+
 async function runBurst() {
   if (burstRunning) return;
   burstRunning = true;
@@ -937,7 +1095,14 @@ async function runBurst() {
       const res = await identifyPhoto(img, (hit) => {
         row.querySelector('.burst-title').textContent = `Numéro ${hit.num}/${hit.total} : recherche…`;
       });
-      if (!res.hit) {
+      if (res.sure) {
+        addFromBurst(res.pick, row);
+      } else if (res.lookalikes) {
+        row.classList.add('warn');
+        row.querySelector('.burst-title').textContent = 'À vérifier : choisis ta carte';
+        row.querySelector('.burst-sub').textContent = 'Les cartes qui ressemblent le plus à ta photo :';
+        burstPicks(row, res.cards);
+      } else if (!res.hit) {
         row.classList.add('warn');
         row.querySelector('.burst-title').textContent = 'Numéro illisible';
         row.querySelector('.burst-sub').textContent = 'Reprends la photo de plus près, ou saisis le numéro en mode normal.';
@@ -945,21 +1110,11 @@ async function runBurst() {
         row.classList.add('warn');
         row.querySelector('.burst-title').textContent = `Aucune carte ${res.hit.num}/${res.hit.total}`;
         row.querySelector('.burst-sub').textContent = 'Vérifie la langue choisie en haut, ou le numéro.';
-      } else if (res.sure) {
-        addFromBurst(res.pick, row);
       } else {
         row.classList.add('warn');
         row.querySelector('.burst-title').textContent = 'À vérifier : choisis ta carte';
         row.querySelector('.burst-sub').textContent = `${res.cards.length} cartes portent le numéro ${res.hit.num}/${res.hit.total}.`;
-        const pick = row.querySelector('.burst-pick');
-        for (const card of res.cards.slice(0, 4)) {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'secondary';
-          b.textContent = `${card.name} · ${card.set ? card.set.name : ''}`;
-          b.addEventListener('click', () => { row.classList.remove('warn'); addFromBurst(card, row); });
-          pick.appendChild(b);
-        }
+        burstPicks(row, res.cards);
       }
     } catch (e) {
       if (row) {

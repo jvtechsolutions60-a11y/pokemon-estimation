@@ -2,12 +2,13 @@
 // - The site itself: network first, so an update shows up at once; the last copy is used offline.
 // - Card data (TCGdex): network first too, the last answer is used offline.
 // - The reading engine (versioned files on jsDelivr): cache first, it never changes.
+// - The card fingerprints (jsDelivr, "empreintes" branch): network first, they are rebuilt every week.
 // - The account server is never touched: it must always reach the network.
 
-const SHELL = 'cotecartes-shell-v1';
+const SHELL = 'cotecartes-shell-v2';
 const DATA = 'cotecartes-data-v1';
 const ENGINE = 'cotecartes-engine-v1';
-const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'sync.js', 'confidentialite.html', 'manifest.webmanifest', 'icons/icon-192.png'];
+const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'sync.js', 'fingerprint.js', 'confidentialite.html', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
@@ -50,6 +51,8 @@ self.addEventListener('fetch', (event) => {
     // Pages are stored without their #hash or ?v= so any link finds them offline.
     event.respondWith(networkFirst(request, SHELL));
   } else if (url.host === 'api.tcgdex.net') {
+    event.respondWith(networkFirst(request, DATA));
+  } else if (url.host === 'cdn.jsdelivr.net' && url.pathname.includes('@empreintes/')) {
     event.respondWith(networkFirst(request, DATA));
   } else if (url.host === 'cdn.jsdelivr.net') {
     event.respondWith(cacheFirst(request, ENGINE));
