@@ -61,3 +61,16 @@ test('OCR : numéro lu sur l\u2019image officielle de Carchacrok C NIV.X', async
   }, bytes);
   assert.deepEqual(hit, { num: 145, total: 147 });
 });
+
+test('empreintes : fichier publié et reconnaissance de l’image officielle de Carchacrok C NIV.X', async () => {
+  const r = await ctx.page.evaluate(async () => {
+    const { ids, index } = await loadFpIndex();
+    const img = await loadRemoteImage('https://assets.tcgdex.net/fr/pl/pl3/145/high.webp');
+    const matches = await matchByImage(img);
+    return { count: ids.length, size: index.length, first: matches[0].id, sure: imageIsSure(matches) };
+  });
+  assert.ok(r.count > 15000, `${r.count} cartes seulement`);
+  assert.equal(r.size, r.count);
+  assert.equal(r.first, 'pl3-145');
+  assert.ok(r.sure);
+});
