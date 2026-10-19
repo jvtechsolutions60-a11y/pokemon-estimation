@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191600';
+const APP_VERSION = '202610191630';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -82,6 +82,7 @@ function sanitizeCollection(list) {
     const market = num(i.marketPrice);
     if (market !== undefined) item.marketPrice = market;
     if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
+    if (i.priceFallback === true) item.priceFallback = true;
     if (i.nameEn) item.nameEn = str(i.nameEn);
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
@@ -264,6 +265,19 @@ function marketPrice(card, variant) {
     : pick('avg7', 'trend', 'avg30', 'avg', 'avg7-holo', 'trend-holo', 'avg30-holo');
 }
 
+// True when the chosen print has no price of its own and the other print's
+// price stands in (a reverse valued at the normal card's price, or the reverse).
+function priceIsFallback(card, variant) {
+  const key = marketPriceKey(card, variant);
+  return Boolean(key) && key.endsWith('-holo') !== (variant === 'reverse');
+}
+
+const FALLBACK_NOTE = {
+  reverse: 'Pas de cote reverse : prix de la version normale',
+  other: 'Pas de cote pour cette version : prix de la reverse',
+};
+const fallbackNote = (variant) => (variant === 'reverse' ? FALLBACK_NOTE.reverse : FALLBACK_NOTE.other);
+
 // "Tendance 31,88 € · 7 j 37,27 € · 30 j 48,65 €" for the chosen print.
 function priceDetails(card, variant) {
   const cm = card && card.pricing && card.pricing.cardmarket;
@@ -299,6 +313,7 @@ function applyMarket(item, card, { force = false } = {}) {
 
   const key = marketPriceKey(card, item.variant);
   if (key) item.marketKey = key.replace('-holo', ''); else delete item.marketKey;
+  if (priceIsFallback(card, item.variant)) item.priceFallback = true; else delete item.priceFallback;
   return true;
 }
 
@@ -306,7 +321,10 @@ function priceSourceLabel(item) {
   if (typeof item.manualPrice === 'number') return item.priceSource || 'Prix saisi à la main';
   if (typeof item.marketPrice !== 'number') return 'Pas de prix';
   const day = item.marketDate ? ` au ${new Date(item.marketDate).toLocaleDateString('fr-FR')}` : '';
-  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}`;
+  const factor = CONDITIONS[item.condition].factor;
+  const cond = factor < 1 ? ` · état ${item.condition} : −${Math.round((1 - factor) * 100)} % (estimation)` : '';
+  const fallback = item.priceFallback ? ` · ${fallbackNote(item.variant)}` : '';
+  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}${cond}${fallback}`;
 }
 
 function unitPrice(item) {
@@ -873,7 +891,9 @@ function resultCard(card) {
   const refresh = () => {
     const p = full ? marketPrice(full, select.value) : null;
     priceEl.textContent = full ? (p === null ? 'Prix inconnu' : `≈ ${euro.format(p)}`) : '…';
-    el.querySelector('.details').textContent = full ? priceDetails(full, select.value) : '';
+    const fallback = full && p !== null && priceIsFallback(full, select.value);
+    el.querySelector('.details').textContent = full ? (fallback ? fallbackNote(select.value) : priceDetails(full, select.value)) : '';
+    el.querySelector('.details').classList.toggle('warn-text', Boolean(fallback));
   };
   const ensureFull = async () => {
     if (!full) {
@@ -1500,7 +1520,7 @@ function renderCollection() {
         <span class="item-meta"></span>
         <span class="item-more" aria-hidden="true">Modifier</span>
       </button>
-      <div class="item-total"><strong>${euro.format(unit * item.qty)}</strong>${item.qty > 1 ? `<span class="muted">${item.qty} × ${euro.format(unit)}</span>` : ''}</div>
+      <div class="item-total"><strong>${euro.format(unit * item.qty)}</strong>${item.qty > 1 ? `<span class="muted">${item.qty} × ${euro.format(unit)}</span>` : ''}${item.priceFallback && typeof item.manualPrice !== 'number' ? `<span class="warn-text" title="${fallbackNote(item.variant)}">⚠ ${item.variant === 'reverse' ? 'cote normale' : 'cote reverse'}</span>` : ''}</div>
       <div class="item-controls">
         <select class="c-variant" aria-label="Version"></select>
         <select class="c-cond" aria-label="État"></select>
@@ -1606,6 +1626,8 @@ function renderCollection() {
   $('count').textContent = count ? cards : '';
   $('sumTotal').textContent = euro.format(total);
   $('sumCount').textContent = String(count);
+  const distinct = new Set(collection.map((i) => i.id)).size;
+  $('sumDistinct').textContent = count > distinct ? `dont ${distinct} différente${distinct > 1 ? 's' : ''}` : '';
   $('sumTop').textContent = top && unitPrice(top) > 0 ? euro.format(unitPrice(top)) : '–';
   $('sumTopName').textContent = top && unitPrice(top) > 0 ? top.name : '';
   $('tabCount').textContent = String(count);
@@ -1947,7 +1969,7 @@ function mergeCollections(base, local, remote) {
       item = { ...here };
       item.qty = Math.max(1, was ? here.qty + there.qty - was.qty : Math.max(here.qty, there.qty));
       if ((Date.parse(there.marketDate) || 0) > (Date.parse(here.marketDate) || 0)) {
-        for (const k of ['marketPrice', 'marketKey', 'marketDate']) {
+        for (const k of ['marketPrice', 'marketKey', 'marketDate', 'priceFallback']) {
           if (k in there) item[k] = there[k]; else delete item[k];
         }
       }

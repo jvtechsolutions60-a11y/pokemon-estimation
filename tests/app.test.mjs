@@ -225,3 +225,25 @@ test('collection sur téléphone : réglages repliés, un toucher les ouvre', ()
   assert.equal(await page.locator('#rows .q-val').textContent(), '3');
   assert.equal(await controls.isVisible(), true);
 }));
+
+test('prix de repli signalé : reverse sans cote reverse, décote d’état indiquée', () => withPage({}, async (page) => {
+  const r = await page.evaluate(() => {
+    const normalOnly = { pricing: { cardmarket: { avg7: 4, updated: '2026-10-10' } } };
+    const both = { pricing: { cardmarket: { avg7: 4, 'avg7-holo': 9, updated: '2026-10-10' } } };
+    const reverseOnly = { pricing: { cardmarket: { 'avg7-holo': 9, updated: '2026-10-10' } } };
+    const item = sanitizeCollection([{ id: 'a', name: 'A', variant: 'reverse', condition: 'EX' }])[0];
+    applyMarket(item, normalOnly, { force: true });
+    const label = priceSourceLabel(item);
+    const kept = sanitizeCollection([item])[0].priceFallback;
+    applyMarket(item, both, { force: true });
+    return {
+      flags: [priceIsFallback(normalOnly, 'reverse'), priceIsFallback(both, 'reverse'), priceIsFallback(both, 'normal'), priceIsFallback(reverseOnly, 'normal')],
+      label, kept, after: item.priceFallback,
+    };
+  });
+  assert.deepEqual(r.flags, [true, false, false, true]);
+  assert.match(r.label, /état EX : −20 % \(estimation\)/);
+  assert.match(r.label, /Pas de cote reverse/);
+  assert.equal(r.kept, true);
+  assert.equal(r.after, undefined);
+}));
