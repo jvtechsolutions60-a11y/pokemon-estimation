@@ -471,6 +471,13 @@ async function readCardText(img) {
   return { top, all: `${top}\n${body}` };
 }
 
+// The top band again, keeping the light pixels: names printed in white on a
+// dark band (Neo, dark Pokémon, recent ex) vanish in the first reading.
+async function readTopLight(img) {
+  const worker = await getWorker();
+  return (await worker.recognize(prepareBand(img, 0.03, 0.22, 200, true))).data.text;
+}
+
 // Whether the card's name shows up in the text read at the top of the photo.
 // OCR often mangles symbols and suffixes ("C NIV.X", "ex", "V"), so the first
 // real word of the name is enough, but it has to be that one: "Alola" alone
@@ -952,7 +959,11 @@ async function identifyPhoto(img, onStep = () => {}) {
   if (hit) {
     onStep(hit, detected);
     const all = await findByNumber(readLang, hit.num, hit.total);
-    const ranked = rankByName(all, text.top);
+    let ranked = rankByName(all, text.top);
+    if (!ranked.named && all.length) {
+      const light = await readTopLight(img).catch(() => '');
+      ranked = rankByName(all, `${text.top}\n${light}`);
+    }
     let { cards } = ranked;
     let best = null;
     const alike = matches ? alsoLookAlike([...cards, ...ranked.others], matches) : [];
