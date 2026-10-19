@@ -14,6 +14,7 @@ Aussi :
 - **mode rafale** : plusieurs photos d'un coup, chaque carte reconnue sans ambiguïté est ajoutée en Near Mint, les autres attendent un choix ;
 - **extensions** : cocher ses cartes, afficher les manquantes et estimer le coût pour compléter ;
 - **courbe de valeur** : un point par jour, gardé sur l'appareil et dans le coffre chiffré du compte ;
+- **souhaits** : cartes recherchées avec un prix cible, prix vérifiés une fois par jour à l'ouverture et alerte quand une carte passe à ce prix (gardés aussi dans le coffre chiffré) ;
 - **appli installable** (PWA, `sw.js`) : fonctionne hors ligne avec les dernières données chargées.
 
 ## Compte anonyme et chiffré
