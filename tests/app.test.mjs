@@ -247,3 +247,23 @@ test('prix de repli signalé : reverse sans cote reverse, décote d’état indi
   assert.equal(r.kept, true);
   assert.equal(r.after, undefined);
 }));
+
+test('grosse collection affichée par pages ; un autre état = une autre ligne', () => withPage({}, async (page) => {
+  const r = await page.evaluate(() => {
+    collection = sanitizeCollection(Array.from({ length: 250 }, (_, i) => ({ id: `c-${i}`, name: `Carte ${i}`, set: 'S', number: `${i}`, marketPrice: i })));
+    renderCollection();
+    const first = document.querySelectorAll('#rows .item').length;
+    document.querySelector('#rows .more-rows').click();
+    const second = document.querySelectorAll('#rows .item').length;
+    const card = { id: 'pl3-145', name: 'Carchacrok', set: { name: 'Rivaux', cardCount: { official: 147 } }, localId: '145', image: '', pricing: {} };
+    collection = [];
+    addToCollection(card, 'normal', 'NM');
+    addToCollection(card, 'normal', 'EX');
+    addToCollection(card, 'normal', 'NM');
+    const split = collection.map((i) => `${i.condition}×${i.qty}`).join(' ');
+    collection[1].condition = 'NM';
+    joinTwin(collection[1]);
+    return { first, second, split, joined: collection.map((i) => `${i.condition}×${i.qty}`).join(' ') };
+  });
+  assert.deepEqual(r, { first: 100, second: 200, split: 'NM×2 EX×1', joined: 'NM×3' });
+}));

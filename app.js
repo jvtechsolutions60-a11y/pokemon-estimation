@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191700';
+const APP_VERSION = '202610191730';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -1440,7 +1440,8 @@ $('lang').addEventListener('change', () => {
 // ---------- UI: collection ----------
 
 function addToCollection(card, variant, condition = 'NM') {
-  const existing = collection.find((i) => i.id === card.id && i.variant === variant && i.lang === lang());
+  // A copy in another condition is a separate entry: its value differs.
+  const existing = collection.find((i) => i.id === card.id && i.variant === variant && i.lang === lang() && i.condition === condition);
   if (existing) {
     existing.qty += 1;
   } else {
@@ -1488,6 +1489,20 @@ function emptyCollection() {
 
 const openItems = new WeakSet(); // rows whose settings are unfolded on a phone
 
+// After a change of print or condition, an entry may now match another one:
+// they become a single entry with both quantities.
+function joinTwin(item) {
+  const twin = collection.find((i) => i !== item && entryKey(i) === entryKey(item));
+  if (!twin) return;
+  twin.qty += item.qty;
+  collection.splice(collection.indexOf(item), 1);
+}
+
+// Big collections are drawn in pages: rebuilding thousands of rows on every
+// tap made each change take about a second on a phone.
+const COL_PAGE = 100;
+let colLimit = COL_PAGE;
+
 function renderCollection() {
   const list = $('rows');
   list.innerHTML = '';
@@ -1509,7 +1524,7 @@ function renderCollection() {
   if (!collection.length) list.appendChild(emptyCollection());
   else if (!shown.length) list.innerHTML = '<p class="muted">Aucune carte ne correspond à ta recherche.</p>';
 
-  for (const item of shown) {
+  for (const item of shown.slice(0, colLimit)) {
     const unit = unitPrice(item);
     const el = document.createElement('article');
     el.className = openItems.has(item) ? 'item open' : 'item';
@@ -1553,6 +1568,7 @@ function renderCollection() {
     variantSel.addEventListener('change', async () => {
       item.variant = variantSel.value;
       try { applyMarket(item, await getCard(item.lang, item.id), { force: true }); } catch { /* keep old price */ }
+      joinTwin(item);
       saveCollection();
       renderCollection();
     });
@@ -1562,6 +1578,7 @@ function renderCollection() {
     condSel.value = item.condition;
     condSel.addEventListener('change', () => {
       item.condition = condSel.value;
+      joinTwin(item);
       saveCollection();
       renderCollection();
     });
@@ -1620,6 +1637,16 @@ function renderCollection() {
     list.appendChild(el);
   }
 
+  if (shown.length > colLimit) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'secondary more-rows';
+    const left = shown.length - colLimit;
+    more.textContent = `Afficher ${Math.min(left, COL_PAGE)} de plus (${left} restante${left > 1 ? 's' : ''})`;
+    more.addEventListener('click', () => { colLimit += COL_PAGE; renderCollection(); });
+    list.appendChild(more);
+  }
+
   if (browseCards.length) renderBrowse();
   const cards = `${count} carte${count > 1 ? 's' : ''}`;
   $('grandTotal').textContent = euro.format(total);
@@ -1636,8 +1663,9 @@ function renderCollection() {
   renderHistory();
 }
 
-$('colFilter').addEventListener('input', renderCollection);
-$('colSort').addEventListener('change', renderCollection);
+for (const [id, event] of [['colFilter', 'input'], ['colSort', 'change']]) {
+  $(id).addEventListener(event, () => { colLimit = COL_PAGE; renderCollection(); });
+}
 
 // ---------- Value history ----------
 //
