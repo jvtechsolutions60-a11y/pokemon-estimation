@@ -5,19 +5,13 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import { startSite, openSite } from './helpers.mjs';
 
-// A crash shows up as an annotation: the run's log can't be read from everywhere.
-const crash = (e) => { console.log(`::error::banc d'essai : ${String((e && e.stack) || e).replace(/\n/g, '%0A')}`); process.exit(1); };
-process.on('uncaughtException', crash);
-process.on('unhandledRejection', crash);
-
 // Recognition by image, when an index was built (index-build.mjs).
 let fp = null;
 try {
   const ids = JSON.parse(await readFile(new URL('./fp-ids.json', import.meta.url), 'utf8'));
   const mod = await import('./fp-node.mjs');
   const index = mod.FP.decodeIndex(await readFile(new URL('./fp-index.bin', import.meta.url)));
-  const names = JSON.parse(await readFile(new URL('./fp-names.json', import.meta.url), 'utf8').catch(() => '{}'));
-  fp = { ids, index, names, ...mod };
+  fp = { ids, index, ...mod };
   console.log(`index d'empreintes : ${index.length} cartes`);
 } catch (e) {
   console.log(`pas d'index d'empreintes (${e.message}) : reconnaissance par image non testée`);
@@ -43,6 +37,42 @@ async function byImage(buf, card, hit, mode) {
     hybridOk: hybrid === card.id,
   };
 }
+
+// Any crash shows up as an annotation on the run page.
+const report = (e) => { console.log(`::error title=Banc d'essai::${String(e && e.stack || e).replace(/\n/g, '%0A')}`); process.exit(1); };
+process.on('uncaughtException', report);
+process.on('unhandledRejection', report);
+
+const COUNT = Number(process.argv[2] || 100);
+const SEED = Number(process.argv[3] || 1);
+const OUT = new URL('./bench-results/', import.meta.url);
+
+const site = await startSite();
+const { browser, page, errors } = await openSite(site);
+
+// Picks the cards: sets spread over the whole history, a few cards each.
+const sample = await page.evaluate(async ({ count, seed }) => {
+  let s = seed >>> 0;
+  const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const sets = (await getSets('fr')).filter((x) => x.cardCount && x.cardCount.official >= 10 && !/classi|promo|mcdonald/i.test(x.name) && !/^(?:[AB]\d+[a-z]?|P-[A-Z])$/.test(x.id));
+  const perSet = 4;
+  const nSets = Math.ceil(count / perSet);
+  const picked = [];
+  for (let i = 0; i < nSets; i++) {
+    const set = sets[Math.floor((i + rand()) * sets.length / nSets)];
+    try {
+      const full = await getJSON(`${API}/fr/sets/${set.id}`);
+      const pool = (full.cards || []).filter((c) => /^\d+$/.test(c.localId) && c.image);
+      for (let k = 0; k < perSet && pool.length; k++) {
+        const c = pool.splice(Math.floor(rand() * pool.length), 1)[0];
+        picked.push({ id: c.id, name: c.name, set: set.name, setId: set.id, num: parseInt(c.localId, 10), total: set.cardCount.official });
+      }
+    } catch { /* set unavailable: skip */ }
+  }
+  return picked.slice(0, count);
+}, { count: COUNT, seed: SEED });
+
+console.log(`${sample.length} cartes tirées`);
 
 // The official image, fetched from here: assets.tcgdex.net's doubled CORS
 // header stops the page from downloading it itself.
