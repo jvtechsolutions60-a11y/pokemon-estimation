@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191030';
+const APP_VERSION = '202610191730';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -82,6 +82,7 @@ function sanitizeCollection(list) {
     const market = num(i.marketPrice);
     if (market !== undefined) item.marketPrice = market;
     if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
+    if (i.priceFallback === true) item.priceFallback = true;
     if (i.nameEn) item.nameEn = str(i.nameEn);
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
@@ -97,8 +98,18 @@ function sanitizeCollection(list) {
 
 try { collection = sanitizeCollection(JSON.parse(safeGet(STORE_KEY))); } catch { collection = []; }
 
+// Asks the browser not to wipe the site's storage when space runs low
+// (Safari otherwise clears it after a few weeks without a visit).
+let persistAsked = false;
+function keepStorage() {
+  if (persistAsked || !collection.length) return;
+  persistAsked = true;
+  navigator.storage?.persist?.().catch(() => {});
+}
+
 function saveCollection({ fromServer = false } = {}) {
   safeSet(STORE_KEY, JSON.stringify(collection));
+  keepStorage();
   if (!fromServer) Sync.changed(collection);
 }
 
@@ -254,6 +265,19 @@ function marketPrice(card, variant) {
     : pick('avg7', 'trend', 'avg30', 'avg', 'avg7-holo', 'trend-holo', 'avg30-holo');
 }
 
+// True when the chosen print has no price of its own and the other print's
+// price stands in (a reverse valued at the normal card's price, or the reverse).
+function priceIsFallback(card, variant) {
+  const key = marketPriceKey(card, variant);
+  return Boolean(key) && key.endsWith('-holo') !== (variant === 'reverse');
+}
+
+const FALLBACK_NOTE = {
+  reverse: 'Pas de cote reverse : prix de la version normale',
+  other: 'Pas de cote pour cette version : prix de la reverse',
+};
+const fallbackNote = (variant) => (variant === 'reverse' ? FALLBACK_NOTE.reverse : FALLBACK_NOTE.other);
+
 // "Tendance 31,88 € · 7 j 37,27 € · 30 j 48,65 €" for the chosen print.
 function priceDetails(card, variant) {
   const cm = card && card.pricing && card.pricing.cardmarket;
@@ -289,6 +313,7 @@ function applyMarket(item, card, { force = false } = {}) {
 
   const key = marketPriceKey(card, item.variant);
   if (key) item.marketKey = key.replace('-holo', ''); else delete item.marketKey;
+  if (priceIsFallback(card, item.variant)) item.priceFallback = true; else delete item.priceFallback;
   return true;
 }
 
@@ -296,7 +321,10 @@ function priceSourceLabel(item) {
   if (typeof item.manualPrice === 'number') return item.priceSource || 'Prix saisi à la main';
   if (typeof item.marketPrice !== 'number') return 'Pas de prix';
   const day = item.marketDate ? ` au ${new Date(item.marketDate).toLocaleDateString('fr-FR')}` : '';
-  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}`;
+  const factor = item.condition ? CONDITIONS[item.condition].factor : 1; // wishes have no condition
+  const cond = factor < 1 ? ` · état ${item.condition} : −${Math.round((1 - factor) * 100)} % (estimation)` : '';
+  const fallback = item.priceFallback ? ` · ${fallbackNote(item.variant)}` : '';
+  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}${cond}${fallback}`;
 }
 
 function unitPrice(item) {
@@ -316,6 +344,7 @@ function getWorker() {
       await worker.setParameters({ tessedit_pageseg_mode: '11' });
       return worker;
     })();
+    workerPromise.catch(() => { workerPromise = null; }); // retry on the next photo
   }
   return workerPromise;
 }
@@ -487,7 +516,10 @@ async function readTopLight(img) {
 // OCR often mangles symbols and suffixes ("C NIV.X", "ex", "V"), so the first
 // real word of the name is enough, but it has to be that one: "Alola" alone
 // must not confuse "Raichu et Raichu d'Alola" with "Brindibou et Noadkoko d'Alola".
-const GENERIC_NAME_WORDS = new Set(['mega', 'team', 'dresseur', 'energie', 'obscur', 'brillant', 'alola', 'galar', 'hisui', 'paldea']);
+// Words of the rules text are skipped too: "attaque" is on every card, so it
+// must not stand for "Attaque sournoise des Rocket".
+const GENERIC_NAME_WORDS = new Set(['mega', 'team', 'dresseur', 'energie', 'obscur', 'brillant', 'alola', 'galar', 'hisui', 'paldea',
+  'attaque', 'pokemon', 'carte', 'cartes', 'degats', 'adversaire', 'joueur', 'recherche', 'pioche', 'main', 'tour', 'super']);
 
 function nameOnPhoto(card, topText) {
   const t = fold(topText).replace(/[^a-z0-9]/g, '');
@@ -863,7 +895,9 @@ function resultCard(card) {
   const refresh = () => {
     const p = full ? marketPrice(full, select.value) : null;
     priceEl.textContent = full ? (p === null ? 'Prix inconnu' : `≈ ${euro.format(p)}`) : '…';
-    el.querySelector('.details').textContent = full ? priceDetails(full, select.value) : '';
+    const fallback = full && p !== null && priceIsFallback(full, select.value);
+    el.querySelector('.details').textContent = full ? (fallback ? fallbackNote(select.value) : priceDetails(full, select.value)) : '';
+    el.querySelector('.details').classList.toggle('warn-text', Boolean(fallback));
   };
   const ensureFull = async () => {
     if (!full) {
@@ -945,13 +979,13 @@ async function identifyPhoto(img, onStep = () => {}) {
   const sets = await getSets(readLang);
   const totals = new Set(sets.flatMap((s) => (s.cardCount ? [s.cardCount.official, s.cardCount.total] : [])));
 
-  // A reading is confirmed when a card with that number has the name read at
-  // the top of the photo: a digit misread then can't add the wrong card.
+  // A reading is confirmed when a card with that number has its name on the
+  // photo (title, or attacks text): a digit misread then can't add the wrong card.
   const named = async (guess) => {
     for (const set of setsWithTotal(sets, guess.total)) {
       try {
         const full = await getSetFull(readLang, set.id);
-        if ((full.cards || []).some((c) => parseInt(c.localId, 10) === guess.num && nameOnPhoto(c, text.top))) return true;
+        if ((full.cards || []).some((c) => parseInt(c.localId, 10) === guess.num && nameOnPhoto(c, text.all))) return true;
       } catch { /* set unavailable */ }
     }
     return false;
@@ -967,22 +1001,19 @@ async function identifyPhoto(img, onStep = () => {}) {
     }
     return false;
   };
-  const hits = text.top.trim() ? await readNumberHits(img, accept) : await readNumberHits(img, async () => true);
+  const hits = text.all.trim() ? await readNumberHits(img, accept) : await readNumberHits(img, async () => true);
   const hit = confirmed || numberGuesses(hits, totals)[0] || hits[0] || null;
   if (hit) {
     onStep(hit, detected);
     const all = await findByNumber(readLang, hit.num, hit.total);
     let ranked = rankByName(all, text.top);
+    // The attacks often name the Pokémon too ("attachée à Lokhlass"); with
+    // several cards of that name, the image still has to pick one.
+    if (!ranked.named && all.length) ranked = rankByName(all, text.all);
+    // Names printed in white on a dark band vanish in the first reading.
     if (!ranked.named && all.length) {
       const light = await readTopLight(img).catch(() => '');
-      ranked = rankByName(all, `${text.top}\n${light}`);
-    }
-    // Last resort: the attacks often name the Pokémon ("attachée à Démolosse").
-    // Weaker proof, so it only counts when the image picks that same card.
-    let nameFromBody = false;
-    if (!ranked.named && all.length) {
-      ranked = rankByName(all, text.all);
-      nameFromBody = ranked.named;
+      ranked = rankByName(all, `${text.all}\n${light}`);
     }
     let { cards } = ranked;
     let best = null;
@@ -1004,7 +1035,7 @@ async function identifyPhoto(img, onStep = () => {}) {
     }
     const others = ranked.others.filter((c) => !cards.includes(c));
     // Added without asking only when the name matches too, and no set is missing.
-    const sure = ranked.named && !nameDisagrees && !all.incomplete && (nameFromBody ? Boolean(best) : (cards.length === 1 || Boolean(best)));
+    const sure = ranked.named && !nameDisagrees && !all.incomplete && (cards.length === 1 || Boolean(best));
     const pick = sure ? (best ? cards.find((c) => c.id === best) : cards[0]) : null;
     if (cards.length || !matches) return { hit, detected, cards, others, best, sure, incomplete: all.incomplete, pick };
   }
@@ -1019,6 +1050,7 @@ async function scanOne(file) {
   const img = await loadImage(file);
   $('previewImg').src = img.src;
   $('preview').hidden = false;
+  $('scanLoader').hidden = false;
   setStatus('Recherche de la carte…');
   $('results').innerHTML = '';
   try {
@@ -1052,6 +1084,12 @@ async function scanOne(file) {
   } catch (e) {
     setStatus(`Lecture impossible (${e.message}). Saisis le numéro à la main.`);
     $('results').innerHTML = '';
+  } finally {
+    $('scanLoader').hidden = true;
+    // On a phone the answer lands below the photo: bring it into view.
+    if ($('results').children.length && innerWidth < 760) {
+      $('ocrStatus').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    }
   }
 }
 
@@ -1079,6 +1117,8 @@ function updateBurstUi() {
     : 'Carte bien à plat, numéro du bas lisible';
   $('burstPanel').hidden = !on || !burstStats.total;
   $('preview').hidden = true;
+  $('results').innerHTML = '';
+  setStatus('');
 }
 
 function renderBurstSummary() {
@@ -1131,9 +1171,9 @@ async function runBurst() {
     try {
       const img = await loadImage(file);
       row = burstRow(img);
-      row.querySelector('.burst-title').textContent = 'Lecture…';
+      row.querySelector('.burst-title').innerHTML = '<span class="pokeball small" aria-hidden="true"><span class="pokeball-face"></span></span>Analyse…';
       const res = await identifyPhoto(img, (hit) => {
-        row.querySelector('.burst-title').textContent = `Numéro ${hit.num}/${hit.total} : recherche…`;
+        row.querySelector('.burst-title').innerHTML = `<span class="pokeball small" aria-hidden="true"><span class="pokeball-face"></span></span>Numéro ${Number(hit.num)}/${Number(hit.total)} : recherche…`;
       });
       if (res.sure) {
         addFromBurst(res.pick, row);
@@ -1168,6 +1208,20 @@ async function runBurst() {
     renderBurstSummary();
   }
   burstRunning = false;
+}
+
+// The reading tools (about 5 MB of fingerprints, the OCR engine) start
+// downloading as soon as the user reaches for the camera, not after the shot.
+let warmedUp = false;
+function warmUpRecognition() {
+  if (warmedUp) return;
+  warmedUp = true;
+  loadFpIndex().catch(() => { warmedUp = false; });
+  getWorker().catch(() => { warmedUp = false; });
+}
+for (const el of [$('drop'), document.querySelector('label[for="photo"]')]) {
+  el?.addEventListener('pointerdown', warmUpRecognition, { passive: true });
+  el?.addEventListener('keydown', warmUpRecognition);
 }
 
 $('photo').addEventListener('change', async (ev) => {
@@ -1412,7 +1466,8 @@ $('lang').addEventListener('change', () => {
 // ---------- UI: collection ----------
 
 function addToCollection(card, variant, condition = 'NM') {
-  const existing = collection.find((i) => i.id === card.id && i.variant === variant && i.lang === lang());
+  // A copy in another condition is a separate entry: its value differs.
+  const existing = collection.find((i) => i.id === card.id && i.variant === variant && i.lang === lang() && i.condition === condition);
   if (existing) {
     existing.qty += 1;
   } else {
@@ -1458,6 +1513,22 @@ function emptyCollection() {
   return el;
 }
 
+const openItems = new WeakSet(); // rows whose settings are unfolded on a phone
+
+// After a change of print or condition, an entry may now match another one:
+// they become a single entry with both quantities.
+function joinTwin(item) {
+  const twin = collection.find((i) => i !== item && entryKey(i) === entryKey(item));
+  if (!twin) return;
+  twin.qty += item.qty;
+  collection.splice(collection.indexOf(item), 1);
+}
+
+// Big collections are drawn in pages: rebuilding thousands of rows on every
+// tap made each change take about a second on a phone.
+const COL_PAGE = 100;
+let colLimit = COL_PAGE;
+
 function renderCollection() {
   const list = $('rows');
   list.innerHTML = '';
@@ -1479,17 +1550,18 @@ function renderCollection() {
   if (!collection.length) list.appendChild(emptyCollection());
   else if (!shown.length) list.innerHTML = '<p class="muted">Aucune carte ne correspond à ta recherche.</p>';
 
-  for (const item of shown) {
+  for (const item of shown.slice(0, colLimit)) {
     const unit = unitPrice(item);
     const el = document.createElement('article');
-    el.className = 'item';
+    el.className = openItems.has(item) ? 'item open' : 'item';
     el.innerHTML = `
       ${safeImage(item.image) ? `<img class="item-img" loading="lazy" src="${safeImage(item.image)}" alt="">` : '<div class="item-img"></div>'}
-      <div class="item-head">
-        <div class="item-name"></div>
-        <div class="item-meta"></div>
-      </div>
-      <div class="item-total"><strong>${euro.format(unit * item.qty)}</strong>${item.qty > 1 ? `<span class="muted">${item.qty} × ${euro.format(unit)}</span>` : ''}</div>
+      <button type="button" class="item-head" aria-expanded="${openItems.has(item)}">
+        <span class="item-name"></span>
+        <span class="item-meta"></span>
+        <span class="item-more" aria-hidden="true">Modifier</span>
+      </button>
+      <div class="item-total"><strong>${euro.format(unit * item.qty)}</strong>${item.qty > 1 ? `<span class="muted">${item.qty} × ${euro.format(unit)}</span>` : ''}${item.priceFallback && typeof item.manualPrice !== 'number' ? `<span class="warn-text" title="${fallbackNote(item.variant)}">⚠ ${item.variant === 'reverse' ? 'cote normale' : 'cote reverse'}</span>` : ''}</div>
       <div class="item-controls">
         <select class="c-variant" aria-label="Version"></select>
         <select class="c-cond" aria-label="État"></select>
@@ -1522,6 +1594,7 @@ function renderCollection() {
     variantSel.addEventListener('change', async () => {
       item.variant = variantSel.value;
       try { applyMarket(item, await getCard(item.lang, item.id), { force: true }); } catch { /* keep old price */ }
+      joinTwin(item);
       saveCollection();
       renderCollection();
     });
@@ -1531,6 +1604,7 @@ function renderCollection() {
     condSel.value = item.condition;
     condSel.addEventListener('change', () => {
       item.condition = condSel.value;
+      joinTwin(item);
       saveCollection();
       renderCollection();
     });
@@ -1562,6 +1636,14 @@ function renderCollection() {
 
     el.querySelector('.cm-open').addEventListener('click', () => openCardmarketDialog(item));
 
+    // On a phone the settings stay folded: a tap on the card opens them.
+    el.querySelector('.item-head').addEventListener('click', () => {
+      const open = !openItems.has(item);
+      if (open) openItems.add(item); else openItems.delete(item);
+      el.classList.toggle('open', open);
+      el.querySelector('.item-head').setAttribute('aria-expanded', String(open));
+    });
+
     el.querySelector('.c-remove').addEventListener('click', () => {
       const i = collection.indexOf(item);
       if (i < 0) return;
@@ -1581,12 +1663,24 @@ function renderCollection() {
     list.appendChild(el);
   }
 
+  if (shown.length > colLimit) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'secondary more-rows';
+    const left = shown.length - colLimit;
+    more.textContent = `Afficher ${Math.min(left, COL_PAGE)} de plus (${left} restante${left > 1 ? 's' : ''})`;
+    more.addEventListener('click', () => { colLimit += COL_PAGE; renderCollection(); });
+    list.appendChild(more);
+  }
+
   if (browseCards.length) renderBrowse();
   const cards = `${count} carte${count > 1 ? 's' : ''}`;
   $('grandTotal').textContent = euro.format(total);
   $('count').textContent = count ? cards : '';
   $('sumTotal').textContent = euro.format(total);
   $('sumCount').textContent = String(count);
+  const distinct = new Set(collection.map((i) => i.id)).size;
+  $('sumDistinct').textContent = count > distinct ? `dont ${distinct} différente${distinct > 1 ? 's' : ''}` : '';
   $('sumTop').textContent = top && unitPrice(top) > 0 ? euro.format(unitPrice(top)) : '–';
   $('sumTopName').textContent = top && unitPrice(top) > 0 ? top.name : '';
   $('tabCount').textContent = String(count);
@@ -1595,8 +1689,9 @@ function renderCollection() {
   renderHistory();
 }
 
-$('colFilter').addEventListener('input', renderCollection);
-$('colSort').addEventListener('change', renderCollection);
+for (const [id, event] of [['colFilter', 'input'], ['colSort', 'change']]) {
+  $(id).addEventListener(event, () => { colLimit = COL_PAGE; renderCollection(); });
+}
 
 // ---------- Value history ----------
 //
@@ -1716,6 +1811,9 @@ for (const b of document.querySelectorAll('[data-range]')) {
 // announced once, and the list rides in the encrypted vault with the history.
 
 const WISH_KEY = 'pokemon-estimation:wishlist';
+// The wishlist as last exchanged with the account, for the same three-way
+// merge as the collection.
+const WISH_SYNCED_KEY = 'pokemon-estimation:wishlist-synced';
 const WISH_CHECK_KEY = 'pokemon-estimation:wishlist-check';
 const WISH_MAX = 500;
 
@@ -2109,6 +2207,51 @@ $('export').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// ---------- Backup file ----------
+//
+// The whole collection and its value history as JSON. Restoring adds the
+// file's cards to the current collection (the same three-way merge as the
+// account, with nothing as common base): nothing already here is removed.
+
+const BACKUP_KIND = 'cotecartes-sauvegarde';
+
+$('backupSave').addEventListener('click', () => {
+  const data = { kind: BACKUP_KIND, version: 1, saved: new Date().toISOString(), collection, history: valueHistory };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  a.download = `cotecartes-sauvegarde-${localDay()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  $('backupMsg').textContent = `Sauvegarde de ${collection.length} carte${collection.length > 1 ? 's' : ''} téléchargée.`;
+});
+
+$('backupFile').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    data = null;
+  }
+  if (!data || data.kind !== BACKUP_KIND || !Array.isArray(data.collection)) {
+    $('backupMsg').textContent = 'Ce fichier n\'est pas une sauvegarde CoteCartes.';
+    return;
+  }
+  const cards = sanitizeCollection(data.collection);
+  const copies = cards.reduce((n, i) => n + i.qty, 0);
+  const when = Date.parse(data.saved) ? ` du ${new Date(data.saved).toLocaleDateString('fr-FR')}` : '';
+  if (!confirm(`Sauvegarde${when} : ${copies} carte${copies > 1 ? 's' : ''}. Les ajouter à ta collection ? Rien n'est supprimé ; une carte présente des deux côtés garde la plus grande quantité.`)) return;
+  const before = collection.length;
+  collection = mergeCollections([], collection, cards);
+  if (Array.isArray(data.history)) mergeHistory(data.history);
+  saveCollection();
+  renderCollection();
+  const added = collection.length - before;
+  $('backupMsg').textContent = `Sauvegarde restaurée : ${added} nouvelle${added > 1 ? 's' : ''} carte${added > 1 ? 's' : ''}.`;
+});
+
 $('clear').addEventListener('click', () => {
   if (!confirm('Vider toute la collection ?')) return;
   collection = [];
@@ -2128,16 +2271,117 @@ function showAccount(view) {
   for (const id of ['accDisabled', 'accOut', 'accNew', 'accIn']) $(id).hidden = id !== view;
 }
 
+// Same card, language, print and condition = same entry, whatever its position.
+function entryKey(item) {
+  return `${item.id}|${item.lang}|${item.variant}|${item.condition}`;
+}
+
+// Three-way merge between the collection at the last sync (base), this device
+// and the server. Each side keeps its own changes; when both changed the same
+// entry, quantity changes add up and the newer Cardmarket price wins. A card
+// deleted on one side but changed on the other is kept: better a card too many
+// than one lost.
+function mergeCollections(base, local, remote) {
+  const keyed = (list) => {
+    const map = new Map();
+    for (const item of sanitizeCollection(list)) {
+      let n = 0;
+      while (map.has(`${entryKey(item)}#${n}`)) n += 1;
+      map.set(`${entryKey(item)}#${n}`, item);
+    }
+    return map;
+  };
+  const b = keyed(base);
+  const l = keyed(local);
+  const r = keyed(remote);
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const merged = [];
+  for (const key of new Set([...r.keys(), ...l.keys()])) {
+    const was = b.get(key);
+    const here = l.get(key);
+    const there = r.get(key);
+    let item;
+    if (same(here, was)) item = there;
+    else if (same(there, was)) item = here;
+    else if (!here || !there) item = here || there;
+    else {
+      item = { ...here };
+      item.qty = Math.max(1, was ? here.qty + there.qty - was.qty : Math.max(here.qty, there.qty));
+      if ((Date.parse(there.marketDate) || 0) > (Date.parse(here.marketDate) || 0)) {
+        for (const k of ['marketPrice', 'marketKey', 'marketDate', 'priceFallback']) {
+          if (k in there) item[k] = there[k]; else delete item[k];
+        }
+      }
+      if (same(here.manualPrice, was && was.manualPrice) && 'manualPrice' in there) {
+        item.manualPrice = there.manualPrice;
+        if (there.priceSource) item.priceSource = there.priceSource;
+      }
+    }
+    if (item) merged.push(item);
+  }
+  return merged;
+}
+
+// Same rule for the wishlist, one entry per card and language: each side keeps
+// its changes; when both changed one, this device's wins (newer price kept).
+function mergeWishlists(base, local, remote) {
+  const keyed = (list) => new Map(sanitizeWishlist(list).map((w) => [`${w.id}|${w.lang}`, w]));
+  const b = keyed(base);
+  const l = keyed(local);
+  const r = keyed(remote);
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const merged = [];
+  for (const key of new Set([...r.keys(), ...l.keys()])) {
+    const was = b.get(key);
+    const here = l.get(key);
+    const there = r.get(key);
+    let wish;
+    if (same(here, was)) wish = there;
+    else if (same(there, was)) wish = here;
+    else if (!here || !there) wish = here || there;
+    else {
+      wish = { ...here };
+      if ((Date.parse(there.marketDate) || 0) > (Date.parse(here.marketDate) || 0)) {
+        for (const k of ['marketPrice', 'marketKey', 'marketDate', 'priceFallback', 'deal']) {
+          if (k in there) wish[k] = there[k]; else delete wish[k];
+        }
+      }
+    }
+    if (wish) merged.push(wish);
+  }
+  return merged;
+}
+
+let wishSent = null; // the wishlist as put in the last save sent to the account
+let wishNeedsPush = false; // set while reading the account, when this device has more
+
 Sync.init({
-  getExtra: () => ({ history: valueHistory, wishlist }),
+  getLocal: () => collection,
+  merge(base, local, remote) {
+    const merged = mergeCollections(base, local, remote);
+    const needsPush = wishNeedsPush || JSON.stringify(merged) !== JSON.stringify(sanitizeCollection(remote));
+    wishNeedsPush = false;
+    return { collection: merged, needsPush };
+  },
+  getExtra() {
+    wishSent = JSON.stringify(wishlist);
+    return { history: valueHistory, wishlist };
+  },
   onExtra(extra) {
     if (extra && extra.history) mergeHistory(extra.history);
-    // Vaults saved before the wishlist existed keep this device's list.
-    if (extra && Array.isArray(extra.wishlist)) {
-      wishlist = sanitizeWishlist(extra.wishlist);
-      saveWishlist({ fromServer: true });
-      renderWishlist();
-    }
+    // Vaults saved before the wishlist existed keep this device's list (and get it).
+    const remote = extra && Array.isArray(extra.wishlist) ? sanitizeWishlist(extra.wishlist) : null;
+    let base = null;
+    try { base = JSON.parse(safeGet(WISH_SYNCED_KEY)); } catch { /* none yet */ }
+    const merged = mergeWishlists(Array.isArray(base) ? base : [], wishlist, remote || []);
+    wishNeedsPush = JSON.stringify(merged) !== JSON.stringify(remote || []);
+    if (remote && !wishNeedsPush) safeSet(WISH_SYNCED_KEY, JSON.stringify(remote));
+    wishlist = merged;
+    saveWishlist({ fromServer: true });
+    renderWishlist();
+  },
+  onSynced() {
+    if (wishSent !== null) safeSet(WISH_SYNCED_KEY, wishSent);
   },
   onRemoteCollection(remote, message) {
     collection = sanitizeCollection(remote);
@@ -2240,6 +2484,7 @@ $('accLogout').addEventListener('click', () => {
   renderCollection();
   wishlist = [];
   saveWishlist({ fromServer: true });
+  safeSet(WISH_SYNCED_KEY, '[]');
   renderWishlist();
   $('accShownCode').hidden = true;
   accMsg('Déconnecté.');
@@ -2288,3 +2533,4 @@ renderCollection();
 renderWishlist();
 loadSetList();
 Sync.resume().then(dailyWishCheck);
+addEventListener('online', () => Sync.retry());

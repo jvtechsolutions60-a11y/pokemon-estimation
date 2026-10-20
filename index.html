@@ -16,7 +16,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="CoteCartes">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3Cpath d='M2 16a14 14 0 0 1 28 0z' fill='%23e3350d' stroke='%231d2130' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=202610191030">
+  <link rel="stylesheet" href="style.css?v=202610191730">
 </head>
 <body>
   <header class="topbar">
@@ -85,9 +85,12 @@
         <div id="preview" class="preview" hidden>
           <img id="previewImg" alt="Photo de la carte">
           <div class="preview-side">
-            <span class="muted small">Zone lue</span>
-            <canvas id="cropCanvas" title="Zone lue"></canvas>
+            <div id="scanLoader" class="scan-loader" hidden>
+              <div class="pokeball" aria-hidden="true"><div class="pokeball-face"></div></div>
+              <span class="muted small">Analyse de la carte…</span>
+            </div>
           </div>
+          <canvas id="cropCanvas" hidden></canvas>
         </div>
 
         <p id="ocrStatus" class="status"></p>
@@ -153,6 +156,7 @@
         <div class="stat">
           <span class="stat-label">Cartes</span>
           <strong id="sumCount">0</strong>
+          <small id="sumDistinct"></small>
         </div>
         <div class="stat">
           <span class="stat-label">Plus chère</span>
@@ -250,7 +254,7 @@
           <ul class="perks">
             <li><span aria-hidden="true">🔑</span> <span>Ton compte est un <strong>code secret</strong> de 20 caractères.</span></li>
             <li><span aria-hidden="true">🔒</span> <span>Ta collection est chiffrée sur ton appareil : le serveur ne peut pas la lire.</span></li>
-            <li><span aria-hidden="true">🙈</span> <span>Aucune donnée personnelle : rien à pirater qui te concerne.</span></li>
+            <li><span aria-hidden="true">🙈</span> <span>Aucune donnée personnelle stockée : ni nom, ni email, ni mot de passe.</span></li>
           </ul>
           <div class="row">
             <button type="button" id="accCreate">Créer un compte</button>
@@ -286,6 +290,17 @@
           <p class="code" id="accShownCode" hidden></p>
         </div>
         <p id="accMsg" class="status"></p>
+      </div>
+      <div class="panel" id="backup">
+        <h2 class="panel-title">Sauvegarde sur fichier</h2>
+        <p class="muted small">Toute ta collection et l'historique de sa valeur dans un fichier, sans ton code secret (et non chiffré).
+          Garde-le en lieu sûr : il permet de tout retrouver, même sans compte ou si le navigateur efface ses données.</p>
+        <div class="row">
+          <button type="button" class="secondary" id="backupSave">Télécharger une sauvegarde</button>
+          <label class="btn secondary" for="backupFile">Restaurer un fichier</label>
+          <input type="file" id="backupFile" accept=".json,application/json" hidden>
+        </div>
+        <p id="backupMsg" class="status"></p>
       </div>
     </section>
   </main>
@@ -325,8 +340,8 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
-  <script src="fingerprint.js?v=202610191030"></script>
-  <script src="sync.js?v=202610191030"></script>
-  <script src="app.js?v=202610191030"></script>
+  <script src="fingerprint.js?v=202610191730"></script>
+  <script src="sync.js?v=202610191730"></script>
+  <script src="app.js?v=202610191730"></script>
 </body>
 </html>

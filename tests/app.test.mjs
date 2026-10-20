@@ -297,3 +297,62 @@ test('souhaits : données nettoyées au chargement', () => withPage({}, async (p
   assert.equal(r[0].image, '');
   assert.equal(r[1].target, 12.35);
 }));
+
+test('collection sur téléphone : réglages repliés, un toucher les ouvre', () => withPage({}, async (page) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    collection = sanitizeCollection([{ id: 'pl3-145', name: 'Carchacrok C NIV.X', set: 'Rivaux Émergents', number: '145/147', qty: 2, marketPrice: 10 }]);
+    saveCollection();
+    renderCollection();
+    location.hash = '#collection';
+  });
+  const controls = page.locator('#rows .item-controls');
+  assert.equal(await controls.isVisible(), false);
+  await page.click('#rows .item-head');
+  assert.equal(await controls.isVisible(), true);
+  await page.click('#rows .q-plus'); // the row is rebuilt and stays open
+  assert.equal(await page.locator('#rows .q-val').textContent(), '3');
+  assert.equal(await controls.isVisible(), true);
+}));
+
+test('prix de repli signalé : reverse sans cote reverse, décote d’état indiquée', () => withPage({}, async (page) => {
+  const r = await page.evaluate(() => {
+    const normalOnly = { pricing: { cardmarket: { avg7: 4, updated: '2026-10-10' } } };
+    const both = { pricing: { cardmarket: { avg7: 4, 'avg7-holo': 9, updated: '2026-10-10' } } };
+    const reverseOnly = { pricing: { cardmarket: { 'avg7-holo': 9, updated: '2026-10-10' } } };
+    const item = sanitizeCollection([{ id: 'a', name: 'A', variant: 'reverse', condition: 'EX' }])[0];
+    applyMarket(item, normalOnly, { force: true });
+    const label = priceSourceLabel(item);
+    const kept = sanitizeCollection([item])[0].priceFallback;
+    applyMarket(item, both, { force: true });
+    return {
+      flags: [priceIsFallback(normalOnly, 'reverse'), priceIsFallback(both, 'reverse'), priceIsFallback(both, 'normal'), priceIsFallback(reverseOnly, 'normal')],
+      label, kept, after: item.priceFallback,
+    };
+  });
+  assert.deepEqual(r.flags, [true, false, false, true]);
+  assert.match(r.label, /état EX : −20 % \(estimation\)/);
+  assert.match(r.label, /Pas de cote reverse/);
+  assert.equal(r.kept, true);
+  assert.equal(r.after, undefined);
+}));
+
+test('grosse collection affichée par pages ; un autre état = une autre ligne', () => withPage({}, async (page) => {
+  const r = await page.evaluate(() => {
+    collection = sanitizeCollection(Array.from({ length: 250 }, (_, i) => ({ id: `c-${i}`, name: `Carte ${i}`, set: 'S', number: `${i}`, marketPrice: i })));
+    renderCollection();
+    const first = document.querySelectorAll('#rows .item').length;
+    document.querySelector('#rows .more-rows').click();
+    const second = document.querySelectorAll('#rows .item').length;
+    const card = { id: 'pl3-145', name: 'Carchacrok', set: { name: 'Rivaux', cardCount: { official: 147 } }, localId: '145', image: '', pricing: {} };
+    collection = [];
+    addToCollection(card, 'normal', 'NM');
+    addToCollection(card, 'normal', 'EX');
+    addToCollection(card, 'normal', 'NM');
+    const split = collection.map((i) => `${i.condition}×${i.qty}`).join(' ');
+    collection[1].condition = 'NM';
+    joinTwin(collection[1]);
+    return { first, second, split, joined: collection.map((i) => `${i.condition}×${i.qty}`).join(' ') };
+  });
+  assert.deepEqual(r, { first: 100, second: 200, split: 'NM×2 EX×1', joined: 'NM×3' });
+}));
