@@ -16,7 +16,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="CoteCartes">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3Cpath d='M2 16a14 14 0 0 1 28 0z' fill='%23e3350d' stroke='%231d2130' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fff' stroke='%231d2130' stroke-width='3'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=202610191730">
+  <link rel="stylesheet" href="style.css?v=202610201300">
 </head>
 <body>
   <header class="topbar">
@@ -193,6 +193,12 @@
             <option value="added">Ajout</option>
           </select>
         </label>
+        <label hidden>Rareté
+          <select id="colRarity"></select>
+        </label>
+        <label hidden>Illustrateur
+          <select id="colArtist"></select>
+        </label>
         <div class="toolbar-actions">
           <button id="refresh" type="button">↻ Actualiser les prix</button>
           <button id="export" type="button" class="secondary">Exporter CSV</button>
@@ -208,6 +214,14 @@
         « Actualiser » ne change un prix que si Cardmarket a publié de nouvelles ventes. Un prix venant de « € Cardmarket » ou saisi à la main n'est jamais remplacé.
         L'état applique une décote indicative.
       </p>
+      <div class="panel fr-uplift">
+        <label>Majoration des cartes françaises
+          <span class="row-inline"><input id="frUplift" type="number" inputmode="numeric" min="0" max="200" step="5" value="0"> %</span>
+        </label>
+        <p class="muted small">Les cotes Cardmarket mélangent toutes les langues. Une carte FR moderne se vend souvent 10 à 75 % plus cher
+          (<a href="https://www.journaldugeek.com/2026/10/03/est-ce-que-les-cartes-pokemon-francaises-valent-plus-cher-que-les-autres-langues/" target="_blank" rel="noopener">Journal du Geek, octobre 2026</a>),
+          l'écart variant selon la carte. Mets ici ta propre majoration : elle s'applique aux cartes FR sans prix saisi à la main. « € Cardmarket » sur une carte donne la moyenne des offres en français.</p>
+      </div>
     </section>
 
     <section class="view" id="view-souhaits" data-view="souhaits" hidden>
@@ -340,8 +354,8 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
-  <script src="fingerprint.js?v=202610191730"></script>
-  <script src="sync.js?v=202610191730"></script>
-  <script src="app.js?v=202610191730"></script>
+  <script src="fingerprint.js?v=202610201300"></script>
+  <script src="sync.js?v=202610201300"></script>
+  <script src="app.js?v=202610201300"></script>
 </body>
 </html>

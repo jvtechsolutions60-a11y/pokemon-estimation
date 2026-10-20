@@ -356,3 +356,29 @@ test('grosse collection affichée par pages ; un autre état = une autre ligne',
   });
   assert.deepEqual(r, { first: 100, second: 200, split: 'NM×2 EX×1', joined: 'NM×3' });
 }));
+
+test('majoration FR et filtres rareté / illustrateur', () => withPage({}, async (page) => {
+  await page.evaluate(() => searchNumber(145, 147, 'Carchacrok C NIV.X'));
+  for (const set of ['Vainqueurs', 'Célébrations']) {
+    await page.locator('#results .card', { hasText: set }).getByRole('button', { name: 'Ajouter' }).click();
+  }
+  await page.evaluate(() => {
+    collection.push(sanitizeCollection([{ id: 'en-1', lang: 'en', name: 'English', set: 'S', number: '1', marketPrice: 10 }])[0]);
+    saveCollection();
+    renderCollection();
+  });
+  await page.goto(`${site.url}#collection`);
+  assert.equal(await page.textContent('#sumTotal'), '37,20 €');
+  await page.fill('#frUplift', '25');
+  await page.dispatchEvent('#frUplift', 'change');
+  // FR cards +25 % (20 → 25, 7,20 → 9), the English one unchanged.
+  assert.equal(await page.textContent('#sumTotal'), '44,00 €');
+  assert.match(await page.textContent('#rows'), /\+25 % carte FR \(ton réglage\)/);
+  await page.selectOption('#colRarity', 'Collection Classique');
+  assert.equal(await page.locator('#rows .item').count(), 1);
+  await page.selectOption('#colRarity', '');
+  await page.selectOption('#colArtist', 'Shizurow');
+  assert.equal(await page.locator('#rows .item').count(), 2);
+  await page.reload();
+  assert.equal(await page.inputValue('#frUplift'), '25');
+}));

@@ -2,6 +2,10 @@
 
 const API = 'https://api.tcgdex.net/v2';
 const STORE_KEY = 'pokemon-estimation:collection';
+// Cardmarket prices mix all languages; French copies of modern cards often sell
+// 10 to 75 % higher. The user can add their own uplift, applied to FR cards.
+const FR_UPLIFT_KEY = 'pokemon-estimation:fr-uplift';
+const FR_UPLIFT_MAX = 200;
 const SETS_CACHE_KEY = 'pokemon-estimation:sets:';
 const SETS_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CANDIDATE_SETS = 10;
@@ -33,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 
 // Shown at the top of the page, to check the phone runs the latest version.
 // Same value as the ?v= of the files in index.html: change both together.
-const APP_VERSION = '202610191730';
+const APP_VERSION = '202610201300';
 $('appVersion').textContent = `v ${APP_VERSION.slice(6, 8)}/${APP_VERSION.slice(4, 6)} ${APP_VERSION.slice(8, 10)}h${APP_VERSION.slice(10, 12)}`;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 
@@ -84,6 +88,8 @@ function sanitizeCollection(list) {
     if (Object.hasOwn(PRICE_KEY_LABELS, i.marketKey)) item.marketKey = i.marketKey;
     if (i.priceFallback === true) item.priceFallback = true;
     if (i.nameEn) item.nameEn = str(i.nameEn);
+    if (i.rarity) item.rarity = str(i.rarity);
+    if (i.illustrator) item.illustrator = str(i.illustrator);
     // Older entries kept the Cardmarket date in priceDate.
     const date = str(i.marketDate || (typeof i.manualPrice !== 'number' ? i.priceDate : ''));
     if (date && !Number.isNaN(Date.parse(date))) item.marketDate = date;
@@ -324,13 +330,30 @@ function priceSourceLabel(item) {
   const factor = item.condition ? CONDITIONS[item.condition].factor : 1; // wishes have no condition
   const cond = factor < 1 ? ` · état ${item.condition} : −${Math.round((1 - factor) * 100)} % (estimation)` : '';
   const fallback = item.priceFallback ? ` · ${fallbackNote(item.variant)}` : '';
-  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}${cond}${fallback}`;
+  const fr = item.condition && upliftFactor(item) > 1 ? ` · +${frUplift} % carte FR (ton réglage)` : '';
+  return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}${cond}${fr}${fallback}`;
+}
+
+function readUplift(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(FR_UPLIFT_MAX, Math.max(0, n)) : 0;
+}
+let frUplift = readUplift(safeGet(FR_UPLIFT_KEY));
+
+function upliftFactor(item) {
+  return item.lang === 'fr' ? 1 + frUplift / 100 : 1;
 }
 
 function unitPrice(item) {
   if (typeof item.manualPrice === 'number') return item.manualPrice;
   if (typeof item.marketPrice !== 'number') return 0;
-  return item.marketPrice * CONDITIONS[item.condition].factor;
+  return item.marketPrice * CONDITIONS[item.condition].factor * upliftFactor(item);
+}
+
+// Rarity and illustrator, for the collection filters.
+function copyTags(item, card) {
+  if (card && card.rarity) item.rarity = String(card.rarity).slice(0, 200);
+  if (card && card.illustrator) item.illustrator = String(card.illustrator).slice(0, 200);
 }
 
 // ---------- OCR ----------
@@ -1484,6 +1507,7 @@ function addToCollection(card, variant, condition = 'NM') {
     });
     const item = collection[collection.length - 1];
     applyMarket(item, card, { force: true });
+    copyTags(item, card);
     const cardLang = lang();
     englishName(card.id, card.name, cardLang).then((en) => {
       if (en && en !== item.name && cardLang !== 'en') { item.nameEn = en; saveCollection(); }
@@ -1515,6 +1539,17 @@ function emptyCollection() {
 
 const openItems = new WeakSet(); // rows whose settings are unfolded on a phone
 
+// A filter menu listing the values found in the collection; hidden while none
+// is known (cards added before this version get theirs with « Actualiser »).
+function fillTagFilter(id, field, allLabel) {
+  const select = $(id);
+  const values = [...new Set(collection.map((i) => i[field]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const keep = values.includes(select.value) ? select.value : '';
+  select.replaceChildren(new Option(allLabel, ''), ...values.map((v) => new Option(v, v)));
+  select.value = keep;
+  select.closest('label').hidden = !values.length;
+}
+
 // After a change of print or condition, an entry may now match another one:
 // they become a single entry with both quantities.
 function joinTwin(item) {
@@ -1542,9 +1577,14 @@ function renderCollection() {
     if (!top || unitPrice(item) > unitPrice(top)) top = item;
   }
 
+  fillTagFilter('colRarity', 'rarity', 'Toutes');
+  fillTagFilter('colArtist', 'illustrator', 'Tous');
   const q = fold($('colFilter').value.trim());
+  const rarity = $('colRarity').value;
+  const artist = $('colArtist').value;
   const shown = collection
-    .filter((i) => !q || fold(`${i.name} ${i.set} ${i.number}`).includes(q))
+    .filter((i) => !q || fold(`${i.name} ${i.set} ${i.number} ${i.rarity || ''} ${i.illustrator || ''}`).includes(q))
+    .filter((i) => (!rarity || i.rarity === rarity) && (!artist || i.illustrator === artist))
     .sort(SORTS[$('colSort').value] || SORTS.value);
 
   if (!collection.length) list.appendChild(emptyCollection());
@@ -1689,7 +1729,7 @@ function renderCollection() {
   renderHistory();
 }
 
-for (const [id, event] of [['colFilter', 'input'], ['colSort', 'change']]) {
+for (const [id, event] of [['colFilter', 'input'], ['colSort', 'change'], ['colRarity', 'change'], ['colArtist', 'change']]) {
   $(id).addEventListener(event, () => { colLimit = COL_PAGE; renderCollection(); });
 }
 
@@ -2161,6 +2201,15 @@ $('cmApply').addEventListener('click', () => {
   $('cmDialog').close();
 });
 
+$('frUplift').value = String(frUplift);
+$('frUplift').addEventListener('change', () => {
+  frUplift = readUplift($('frUplift').value);
+  $('frUplift').value = String(frUplift);
+  safeSet(FR_UPLIFT_KEY, String(frUplift));
+  Sync.changed(collection);
+  renderCollection();
+});
+
 $('refresh').addEventListener('click', async () => {
   const btn = $('refresh');
   btn.disabled = true;
@@ -2168,7 +2217,9 @@ $('refresh').addEventListener('click', async () => {
   let changed = 0;
   for (const item of collection) {
     try {
-      if (applyMarket(item, await getCard(item.lang, item.id))) changed += 1;
+      const card = await getCard(item.lang, item.id);
+      copyTags(item, card);
+      if (applyMarket(item, card)) changed += 1;
     } catch { /* keep old price */ }
   }
   saveCollection();
@@ -2365,10 +2416,15 @@ Sync.init({
   },
   getExtra() {
     wishSent = JSON.stringify(wishlist);
-    return { history: valueHistory, wishlist };
+    return { history: valueHistory, wishlist, frUplift };
   },
   onExtra(extra) {
     if (extra && extra.history) mergeHistory(extra.history);
+    if (extra && typeof extra.frUplift === 'number') {
+      frUplift = readUplift(extra.frUplift);
+      safeSet(FR_UPLIFT_KEY, String(frUplift));
+      $('frUplift').value = String(frUplift);
+    }
     // Vaults saved before the wishlist existed keep this device's list (and get it).
     const remote = extra && Array.isArray(extra.wishlist) ? sanitizeWishlist(extra.wishlist) : null;
     let base = null;

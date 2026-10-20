@@ -13,9 +13,9 @@ const card = (id, localId, name, setIndex, pricing) => {
 
 export const cards = {
   'ecard2-145': card('ecard2-145', '145', 'Énergie super', 0),
-  'pl3-145': card('pl3-145', '145', 'Carchacrok C NIV.X', 1, { cardmarket: { idProduct: 278836, updated: '2026-10-17T00:00:00Z', avg7: 20, trend: 18 } }),
+  'pl3-145': { ...card('pl3-145', '145', 'Carchacrok C NIV.X', 1, { cardmarket: { idProduct: 278836, updated: '2026-10-17T00:00:00Z', avg7: 20, trend: 18 } }), rarity: 'Holo Rare NIV.X', illustrator: 'Shizurow' },
   'sm3-145': card('sm3-145', '145', 'Apocyne', 2),
-  'cel25cc-CC018': card('cel25cc-CC018', 'CC018', 'Carchacrok C NIV.X', 3, { cardmarket: { idProduct: 576788, updated: '2026-10-18T00:00:00Z', avg7: 7.2, trend: 6.45, 'avg7-holo': 9 } }),
+  'cel25cc-CC018': { ...card('cel25cc-CC018', 'CC018', 'Carchacrok C NIV.X', 3, { cardmarket: { idProduct: 576788, updated: '2026-10-18T00:00:00Z', avg7: 7.2, trend: 6.45, 'avg7-holo': 9 } }), rarity: 'Collection Classique', illustrator: 'Shizurow' },
 };
 
 export const englishNames = { 'pl3-145': 'Garchomp C LV.X', 'cel25cc-CC018': 'Garchomp C LV.X' };
