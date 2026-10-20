@@ -28,15 +28,15 @@
       <h2>Ce qui reste sur ton appareil</h2>
       <ul>
         <li><strong>Les photos de cartes</strong> sont lues directement dans ton navigateur. Elles ne sont envoyées nulle part.</li>
-        <li><strong>Ta collection</strong> (cartes, état, quantités, prix) est enregistrée dans le stockage local de ton navigateur.
+        <li><strong>Ta collection</strong> (cartes, état, quantités, prix) et tes <strong>cartes recherchées</strong> (prix cibles) sont enregistrées dans le stockage local de ton navigateur.
           C'est nécessaire au fonctionnement que tu demandes, il n'y a donc pas de bandeau de consentement.
-          Le bouton « Vider » l'efface.</li>
+          Le bouton « Vider » efface la collection, ✕ retire une carte recherchée.</li>
       </ul>
 
       <h2>Le compte (facultatif)</h2>
       <ul>
         <li>Ton compte est un code secret aléatoire créé sur ton appareil. Nous ne savons pas à qui il appartient.</li>
-        <li>Ta collection est chiffrée sur ton appareil (AES-256) avant d'être envoyée. Le serveur ne stocke qu'un identifiant
+        <li>Ta collection, son évolution et tes cartes recherchées sont chiffrées sur ton appareil (AES-256) avant d'être envoyées. Le serveur ne stocke qu'un identifiant
           aléatoire, une empreinte du jeton d'accès et ce bloc chiffré : il ne peut pas lire ta collection.</li>
         <li>Le serveur ne tient pas de journal des connexions et ne conserve pas d'adresse IP. Pour bloquer les abus,
           il compte les demandes de chaque connexion pendant une minute, à partir d'une empreinte de l'adresse gardée seulement en mémoire.</li>

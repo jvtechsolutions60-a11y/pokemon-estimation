@@ -149,3 +149,34 @@ test('sauvegarde sur fichier : restaurer ajoute sans rien supprimer', async () =
     await browser.close();
   }
 });
+
+test('souhaits synchronisés sans perte, comme la collection', async () => {
+  const server = fakeServer();
+  const a = await device(server);
+  const b = await device(server);
+  const wish = (page, id) => page.evaluate((w) => { wishlist.push(sanitizeWishlist([w])[0]); saveWishlist(); }, { id, name: id, set: 'S', number: '1/1' });
+  const wishes = (page) => page.evaluate(() => wishlist.map((w) => w.id).sort().join(' '));
+  try {
+    await wish(a.page, 'w-1');
+    const code = await a.page.evaluate(async () => { const c = Sync.generateCode(); await Sync.create(c, collection); return c; });
+    await b.page.evaluate((c) => Sync.login(c), code);
+    assert.equal(await wishes(b.page), 'w-1');
+
+    server.offline = true;
+    await wish(a.page, 'w-2');
+    await a.page.waitForFunction(() => document.getElementById('accState').textContent === 'Erreur', null, { timeout: 15000 });
+    server.offline = false;
+    await a.page.reload();
+    await saved(a.page);
+    assert.equal(await wishes(a.page), 'w-1 w-2', 'souhait ajouté hors ligne perdu');
+
+    await b.page.evaluate(() => { wishlist = wishlist.filter((w) => w.id !== 'w-1'); saveWishlist(); });
+    await saved(b.page);
+    await a.page.reload();
+    await saved(a.page);
+    assert.equal(await wishes(a.page), 'w-2');
+  } finally {
+    await a.browser.close();
+    await b.browser.close();
+  }
+});

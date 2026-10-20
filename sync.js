@@ -34,6 +34,7 @@ const Sync = (() => {
   let getLocal = null;
   let merge = (base, local, remote) => ({ collection: remote, needsPush: false });
   let pushFailed = false;
+  let onSynced = () => {};
   // Server exchanges run one after the other, so two of them never race on the version.
   let queue = Promise.resolve();
   const serial = (fn) => {
@@ -171,6 +172,7 @@ const Sync = (() => {
     version = payload.version;
     safeSet(VERSION_KEY, String(version));
     setBase(collection);
+    onSynced();
   }
 
   // Keeps what changed on this device since the last exchange and what
@@ -221,8 +223,10 @@ const Sync = (() => {
     // getExtra/onExtra carry data saved beside the collection (value history).
     // getLocal returns this device's collection; merge(base, local, remote)
     // returns { collection, needsPush }.
-    init({ onRemoteCollection, onStateChange, getExtra: extraGetter, onExtra: extraHandler, getLocal: localGetter, merge: merger }) {
+    // onSynced runs after each save the server accepted.
+    init({ onRemoteCollection, onStateChange, getExtra: extraGetter, onExtra: extraHandler, getLocal: localGetter, merge: merger, onSynced: syncedHandler }) {
       onRemote = onRemoteCollection;
+      if (syncedHandler) onSynced = syncedHandler;
       if (localGetter) getLocal = localGetter;
       if (merger) merge = merger;
       if (extraGetter) getExtra = extraGetter;

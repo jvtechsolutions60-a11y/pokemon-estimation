@@ -321,7 +321,7 @@ function priceSourceLabel(item) {
   if (typeof item.manualPrice === 'number') return item.priceSource || 'Prix saisi à la main';
   if (typeof item.marketPrice !== 'number') return 'Pas de prix';
   const day = item.marketDate ? ` au ${new Date(item.marketDate).toLocaleDateString('fr-FR')}` : '';
-  const factor = CONDITIONS[item.condition].factor;
+  const factor = item.condition ? CONDITIONS[item.condition].factor : 1; // wishes have no condition
   const cond = factor < 1 ? ` · état ${item.condition} : −${Math.round((1 - factor) * 100)} % (estimation)` : '';
   const fallback = item.priceFallback ? ` · ${fallbackNote(item.variant)}` : '';
   return `${PRICE_KEY_LABELS[item.marketKey] || 'Prix Cardmarket'}${day}${cond}${fallback}`;
@@ -870,7 +870,8 @@ function resultCard(card) {
     <div class="price"></div>
     <div class="details muted small"></div>
     <a class="cm small" target="_blank" rel="noopener">Voir sur Cardmarket</a>
-    <button type="button">Ajouter</button>`;
+    <button type="button" class="add">Ajouter</button>
+    <button type="button" class="secondary wish-btn"></button>`;
   el.querySelector('.title').textContent = card.name;
   const cm = el.querySelector('.cm');
   cm.href = cardmarketLink(card.name, lang());
@@ -884,7 +885,10 @@ function resultCard(card) {
     select.appendChild(opt);
   }
   const priceEl = el.querySelector('.price');
-  const button = el.querySelector('button');
+  const button = el.querySelector('.add');
+  const wishBtn = el.querySelector('.wish-btn');
+  const wishLabel = (on) => { wishBtn.textContent = on ? '★ Dans tes souhaits' : '☆ Souhait'; };
+  wishLabel(wishIndex(card.id) >= 0);
 
   // List results only carry id/name/image: load details on demand.
   let full = card.pricing !== undefined ? card : null;
@@ -913,6 +917,10 @@ function resultCard(card) {
     button.textContent = 'Ajoutée ✓';
     button.classList.add('added');
     toast(`${full.name} ajoutée à ta collection`, { label: 'Voir', href: '#collection' });
+  });
+  wishBtn.addEventListener('click', async () => {
+    await ensureFull();
+    wishLabel(toggleWish(full, select.value));
   });
   return el;
 }
@@ -1318,8 +1326,26 @@ function renderBrowse() {
       ${c.image && safeImage(`${c.image}/low.webp`) ? `<img loading="lazy" src="${safeImage(`${c.image}/low.webp`)}" alt="">` : '<div class="noimg"></div>'}
       <span class="tick-row"><input type="checkbox"> <span class="tick-name"></span></span>
       <span class="tick-meta"><span class="muted small tick-num"></span><span class="tick-price"></span></span>
-      <select class="tick-cond"></select>`;
+      <select class="tick-cond"></select>
+      ${item ? '' : `<button type="button" class="tick-wish">${wishIndex(c.id) >= 0 ? '★' : '☆'}</button>`}`;
     el.querySelector('.tick-name').textContent = c.name;
+    const star = el.querySelector('.tick-wish');
+    if (star) {
+      const on = wishIndex(c.id) >= 0;
+      star.title = on ? 'Retirer de mes souhaits' : 'Ajouter à mes souhaits';
+      star.setAttribute('aria-label', `${star.title} : ${c.name}`);
+      star.classList.toggle('on', on);
+      star.addEventListener('click', async (e) => {
+        e.preventDefault();
+        star.disabled = true;
+        try {
+          toggleWish(await getCard(lang(), c.id));
+        } catch (err) {
+          star.disabled = false;
+          $('setInfo').textContent = `Impossible d'ajouter ${c.name} à tes souhaits : ${err.message}`;
+        }
+      });
+    }
     el.querySelector('.tick-num').textContent = browseOfficial ? `${c.localId}/${browseOfficial}` : c.localId;
     const known = item ? unitPrice(item) : missingPrices.get(priceKey(c.id));
     if (typeof known === 'number' && known > 0) el.querySelector('.tick-price').textContent = euro.format(known);
@@ -1778,9 +1804,249 @@ for (const b of document.querySelectorAll('[data-range]')) {
   b.addEventListener('click', () => { historyRange = Number(b.dataset.range); renderHistory(); });
 }
 
+// ---------- Wishlist ----------
+//
+// Cards the user is looking for, with an optional target price. Prices are
+// checked once a day when the site opens, a card that falls to its target is
+// announced once, and the list rides in the encrypted vault with the history.
+
+const WISH_KEY = 'pokemon-estimation:wishlist';
+// The wishlist as last exchanged with the account, for the same three-way
+// merge as the collection.
+const WISH_SYNCED_KEY = 'pokemon-estimation:wishlist-synced';
+const WISH_CHECK_KEY = 'pokemon-estimation:wishlist-check';
+const WISH_MAX = 500;
+
+// Same fields as a collection entry, minus condition, quantity and manual price.
+function sanitizeWishlist(list) {
+  if (!Array.isArray(list)) return [];
+  const raw = list.filter((w) => w && typeof w === 'object' && typeof w.id === 'string').slice(0, WISH_MAX);
+  return sanitizeCollection(raw).map((item, k) => {
+    const { condition, qty, manualPrice, priceSource, ...wish } = item;
+    const { target, deal } = raw[k];
+    if (typeof target === 'number' && Number.isFinite(target) && target > 0) wish.target = Math.round(target * 100) / 100;
+    if (deal === true) wish.deal = true;
+    return wish;
+  });
+}
+
+let wishlist = [];
+try { wishlist = sanitizeWishlist(JSON.parse(safeGet(WISH_KEY))); } catch { wishlist = []; }
+
+function saveWishlist({ fromServer = false } = {}) {
+  safeSet(WISH_KEY, JSON.stringify(wishlist));
+  if (!fromServer) Sync.changed(collection);
+}
+
+function isDeal(wish) {
+  return typeof wish.target === 'number' && typeof wish.marketPrice === 'number' && wish.marketPrice <= wish.target;
+}
+
+function wishIndex(id, cardLang = lang()) {
+  return wishlist.findIndex((w) => w.id === id && w.lang === cardLang);
+}
+
+// Adds the card (full TCGdex entry) or takes it off the list; true when it is now on it.
+function toggleWish(card, variant = defaultVariant(card)) {
+  const k = wishIndex(card.id);
+  if (k >= 0) {
+    wishlist.splice(k, 1);
+    toast(`${card.name} retirée de tes souhaits`);
+  } else {
+    const wish = {
+      id: card.id,
+      lang: lang(),
+      name: card.name,
+      set: card.set.name,
+      number: displayNumber(card),
+      image: card.image ? `${card.image}/low.webp` : '',
+      variant,
+    };
+    applyMarket(wish, card, { force: true });
+    wishlist.unshift(wish);
+    wishlist = wishlist.slice(0, WISH_MAX);
+    const cardLang = lang();
+    englishName(card.id, card.name, cardLang).then((en) => {
+      if (en && en !== wish.name && cardLang !== 'en') { wish.nameEn = en; saveWishlist(); }
+    });
+    toast(`${card.name} ajoutée à tes souhaits`, { label: 'Voir', href: '#souhaits' });
+  }
+  saveWishlist();
+  renderWishlist();
+  if (browseCards.length) renderBrowse();
+  return k < 0;
+}
+
+// Moves a wished card into the collection, in Near Mint.
+function wishToCollection(wish) {
+  const existing = collection.find((i) => i.id === wish.id && i.variant === wish.variant && i.lang === wish.lang);
+  if (existing) existing.qty += 1;
+  else {
+    const { target, deal, ...item } = wish;
+    collection.push({ ...item, condition: 'NM', qty: 1 });
+  }
+  wishlist = wishlist.filter((w) => w !== wish);
+  saveWishlist({ fromServer: true });
+  saveCollection();
+  renderCollection();
+  renderWishlist();
+  toast(`${wish.name} ajoutée à ta collection`, { label: 'Voir', href: '#collection' });
+}
+
+function renderWishlist() {
+  const list = $('wishRows');
+  list.innerHTML = '';
+  const deals = wishlist.filter(isDeal);
+  const total = wishlist.reduce((sum, w) => sum + (typeof w.marketPrice === 'number' ? w.marketPrice : 0), 0);
+  $('wishTotal').textContent = euro.format(total);
+  $('wishCount').textContent = String(wishlist.length);
+  $('wishDeals').textContent = String(deals.length);
+  $('wishBadge').textContent = String(deals.length);
+  $('wishBadge').hidden = !deals.length;
+
+  if (!wishlist.length) {
+    const el = document.createElement('div');
+    el.className = 'empty';
+    el.innerHTML = `
+      <span class="big" aria-hidden="true">⭐</span>
+      <p>Aucune carte recherchée. Touche ☆ sur une carte trouvée ou manquante pour suivre son prix.</p>
+      <div class="row">
+        <a class="btn" href="#scan">🔎 Chercher une carte</a>
+        <a class="btn secondary" href="#extensions">☑️ Voir les manquantes</a>
+      </div>`;
+    list.appendChild(el);
+    return;
+  }
+
+  // Cards at the user's price first, then the newest additions.
+  const shown = [...deals, ...wishlist.filter((w) => !isDeal(w))];
+  for (const wish of shown) {
+    const el = document.createElement('article');
+    el.className = `item wish${isDeal(wish) ? ' deal' : ''}`;
+    const price = typeof wish.marketPrice === 'number' ? euro.format(wish.marketPrice) : '–';
+    el.innerHTML = `
+      ${safeImage(wish.image) ? `<img class="item-img" loading="lazy" src="${safeImage(wish.image)}" alt="">` : '<div class="item-img"></div>'}
+      <div class="item-head">
+        <div class="item-name"></div>
+        <div class="item-meta"></div>
+        ${isDeal(wish) ? '<span class="wish-deal">✓ À ton prix</span>' : ''}
+      </div>
+      <div class="item-total"><strong>${price}</strong>${wish.target ? `<span class="muted">cible ${euro.format(wish.target)}</span>` : ''}</div>
+      <div class="item-controls">
+        <select class="w-variant" aria-label="Version"></select>
+        <label class="price-edit">Mon prix
+          <input class="w-target" type="number" inputmode="decimal" min="0" step="0.01" placeholder="–" aria-label="Prix cible en euros">
+        </label>
+        <span class="item-actions">
+          <a class="btn secondary w-cm" target="_blank" rel="noopener">Cardmarket</a>
+          <button type="button" class="secondary w-got" title="Ajouter à ma collection">Je l'ai</button>
+          <button type="button" class="icon w-remove" title="Retirer des souhaits" aria-label="Retirer">✕</button>
+        </span>
+        <span class="price-src"></span>
+      </div>`;
+    el.querySelector('.item-name').textContent = wish.name;
+    const meta = el.querySelector('.item-meta');
+    meta.textContent = `${wish.number} · ${wish.set}`;
+    const tag = document.createElement('span');
+    tag.className = 'item-lang';
+    tag.textContent = (wish.lang || '').toUpperCase();
+    meta.appendChild(tag);
+    el.querySelector('.price-src').textContent = priceSourceLabel(wish);
+    el.querySelector('.w-cm').href = cardmarketLink(wish.nameEn || wish.name, wish.lang);
+
+    const variantSel = el.querySelector('.w-variant');
+    for (const [k, label] of Object.entries(VARIANTS)) variantSel.appendChild(new Option(label, k));
+    variantSel.value = wish.variant;
+    variantSel.addEventListener('change', async () => {
+      wish.variant = variantSel.value;
+      try { applyMarket(wish, await getCard(wish.lang, wish.id), { force: true }); } catch { /* keep old price */ }
+      wish.deal = isDeal(wish);
+      saveWishlist();
+      renderWishlist();
+    });
+
+    const targetInput = el.querySelector('.w-target');
+    if (wish.target) targetInput.value = wish.target.toFixed(2);
+    targetInput.addEventListener('change', () => {
+      const v = parseFloat(String(targetInput.value).replace(',', '.'));
+      if (Number.isFinite(v) && v > 0) wish.target = Math.round(v * 100) / 100;
+      else delete wish.target;
+      // Already at that price: the row shows it, no need to announce it later.
+      wish.deal = isDeal(wish);
+      saveWishlist();
+      renderWishlist();
+    });
+
+    el.querySelector('.w-got').addEventListener('click', () => wishToCollection(wish));
+    el.querySelector('.w-remove').addEventListener('click', () => {
+      const i = wishlist.indexOf(wish);
+      if (i < 0) return;
+      wishlist.splice(i, 1);
+      saveWishlist();
+      renderWishlist();
+      if (browseCards.length) renderBrowse();
+      toast(`${wish.name} retirée de tes souhaits`, {
+        label: 'Annuler',
+        onClick() {
+          wishlist.splice(Math.min(i, wishlist.length), 0, wish);
+          saveWishlist();
+          renderWishlist();
+        },
+      });
+    });
+    list.appendChild(el);
+  }
+}
+
+// Fetches today's prices; returns the cards that just reached their target.
+async function refreshWishlist() {
+  let changed = 0;
+  for (const wish of wishlist) {
+    try {
+      if (applyMarket(wish, await getCard(wish.lang, wish.id))) changed += 1;
+    } catch { /* keep old price */ }
+  }
+  const reached = [];
+  for (const wish of wishlist) {
+    const deal = isDeal(wish);
+    if (deal && !wish.deal) reached.push(wish);
+    wish.deal = deal;
+  }
+  safeSet(WISH_CHECK_KEY, localDay());
+  saveWishlist();
+  renderWishlist();
+  return { changed, reached };
+}
+
+function announceDeals(reached) {
+  if (!reached.length) return;
+  const message = reached.length === 1
+    ? `🔔 ${reached[0].name} est à ton prix : ${euro.format(reached[0].marketPrice)}`
+    : `🔔 ${reached.length} cartes recherchées sont à ton prix`;
+  toast(message, { label: 'Voir', href: '#souhaits' });
+}
+
+async function dailyWishCheck() {
+  if (!wishlist.length || safeGet(WISH_CHECK_KEY) === localDay()) return;
+  announceDeals((await refreshWishlist()).reached);
+}
+
+$('wishRefresh').addEventListener('click', async () => {
+  const btn = $('wishRefresh');
+  btn.disabled = true;
+  btn.textContent = 'Actualisation…';
+  const { changed, reached } = await refreshWishlist();
+  btn.disabled = false;
+  btn.textContent = '↻ Actualiser les prix';
+  $('wishInfo').textContent = changed
+    ? `${changed} prix mis à jour avec les nouvelles ventes Cardmarket.`
+    : 'Aucun nouveau prix Cardmarket depuis la dernière actualisation.';
+  announceDeals(reached);
+});
+
 // ---------- UI: navigation and toast ----------
 
-const VIEWS = ['scan', 'extensions', 'collection', 'compte'];
+const VIEWS = ['scan', 'extensions', 'collection', 'souhaits', 'compte'];
 
 function showView() {
   const name = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'scan';
@@ -2056,14 +2322,67 @@ function mergeCollections(base, local, remote) {
   return merged;
 }
 
+// Same rule for the wishlist, one entry per card and language: each side keeps
+// its changes; when both changed one, this device's wins (newer price kept).
+function mergeWishlists(base, local, remote) {
+  const keyed = (list) => new Map(sanitizeWishlist(list).map((w) => [`${w.id}|${w.lang}`, w]));
+  const b = keyed(base);
+  const l = keyed(local);
+  const r = keyed(remote);
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const merged = [];
+  for (const key of new Set([...r.keys(), ...l.keys()])) {
+    const was = b.get(key);
+    const here = l.get(key);
+    const there = r.get(key);
+    let wish;
+    if (same(here, was)) wish = there;
+    else if (same(there, was)) wish = here;
+    else if (!here || !there) wish = here || there;
+    else {
+      wish = { ...here };
+      if ((Date.parse(there.marketDate) || 0) > (Date.parse(here.marketDate) || 0)) {
+        for (const k of ['marketPrice', 'marketKey', 'marketDate', 'priceFallback', 'deal']) {
+          if (k in there) wish[k] = there[k]; else delete wish[k];
+        }
+      }
+    }
+    if (wish) merged.push(wish);
+  }
+  return merged;
+}
+
+let wishSent = null; // the wishlist as put in the last save sent to the account
+let wishNeedsPush = false; // set while reading the account, when this device has more
+
 Sync.init({
   getLocal: () => collection,
   merge(base, local, remote) {
     const merged = mergeCollections(base, local, remote);
-    return { collection: merged, needsPush: JSON.stringify(merged) !== JSON.stringify(sanitizeCollection(remote)) };
+    const needsPush = wishNeedsPush || JSON.stringify(merged) !== JSON.stringify(sanitizeCollection(remote));
+    wishNeedsPush = false;
+    return { collection: merged, needsPush };
   },
-  getExtra: () => ({ history: valueHistory }),
-  onExtra(extra) { if (extra && extra.history) mergeHistory(extra.history); },
+  getExtra() {
+    wishSent = JSON.stringify(wishlist);
+    return { history: valueHistory, wishlist };
+  },
+  onExtra(extra) {
+    if (extra && extra.history) mergeHistory(extra.history);
+    // Vaults saved before the wishlist existed keep this device's list (and get it).
+    const remote = extra && Array.isArray(extra.wishlist) ? sanitizeWishlist(extra.wishlist) : null;
+    let base = null;
+    try { base = JSON.parse(safeGet(WISH_SYNCED_KEY)); } catch { /* none yet */ }
+    const merged = mergeWishlists(Array.isArray(base) ? base : [], wishlist, remote || []);
+    wishNeedsPush = JSON.stringify(merged) !== JSON.stringify(remote || []);
+    if (remote && !wishNeedsPush) safeSet(WISH_SYNCED_KEY, JSON.stringify(remote));
+    wishlist = merged;
+    saveWishlist({ fromServer: true });
+    renderWishlist();
+  },
+  onSynced() {
+    if (wishSent !== null) safeSet(WISH_SYNCED_KEY, wishSent);
+  },
   onRemoteCollection(remote, message) {
     collection = sanitizeCollection(remote);
     saveCollection({ fromServer: true });
@@ -2158,11 +2477,15 @@ $('accShow').addEventListener('click', () => {
 });
 
 $('accLogout').addEventListener('click', () => {
-  if (!confirm('Se déconnecter ? La collection sera effacée de cet appareil (elle reste sur ton compte).')) return;
+  if (!confirm('Se déconnecter ? La collection et les souhaits seront effacés de cet appareil (ils restent sur ton compte).')) return;
   Sync.logout();
   collection = [];
   saveCollection({ fromServer: true });
   renderCollection();
+  wishlist = [];
+  saveWishlist({ fromServer: true });
+  safeSet(WISH_SYNCED_KEY, '[]');
+  renderWishlist();
   $('accShownCode').hidden = true;
   accMsg('Déconnecté.');
 });
@@ -2207,6 +2530,7 @@ if (!standalone && /iphone|ipad|ipod/i.test(navigator.userAgent) && !safeGet('po
 
 showView();
 renderCollection();
+renderWishlist();
 loadSetList();
-Sync.resume();
+Sync.resume().then(dailyWishCheck);
 addEventListener('online', () => Sync.retry());

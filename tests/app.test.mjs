@@ -209,6 +209,95 @@ test('reconnaissance par l’image : carte inclinée sur un fond chargé, reconn
   assert.match(await page.textContent('#results .card.best'), /Correspond à ta photo/);
 }));
 
+test('souhaits : ajout depuis la recherche, prix cible, gardés après rechargement', () => withPage({}, async (page) => {
+  await page.evaluate(() => searchNumber(145, 147, 'Carchacrok C NIV.X'));
+  const card = page.locator('#results .card', { hasText: 'Célébrations' });
+  await card.getByRole('button', { name: '☆ Souhait' }).click();
+  await card.getByRole('button', { name: '★ Dans tes souhaits' }).waitFor();
+  await page.goto(`${site.url}#souhaits`);
+  const row = page.locator('#wishRows .item');
+  assert.equal(await row.count(), 1);
+  assert.match(await row.innerText(), /Carchacrok C NIV\.X[\s\S]*7,20/);
+  assert.equal(await page.isHidden('#wishBadge'), true);
+  await row.locator('.w-target').fill('8');
+  await row.locator('.w-target').dispatchEvent('change');
+  await page.waitForSelector('#wishRows .item.deal');
+  await page.reload();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('pokemon-estimation:wishlist')));
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].target, 8);
+  assert.equal(saved[0].deal, true);
+  assert.equal(await page.textContent('#wishBadge'), '1');
+  assert.match(await page.textContent('#wishRows .item'), /À ton prix/);
+  // A card already at its price when the target is set is not announced again later.
+  assert.equal(await page.isHidden('#toast'), true);
+}));
+
+test('souhaits : vérification du jour, alerte quand le prix passe sous la cible', () => withPage({}, async (page) => {
+  await page.evaluate(() => {
+    localStorage.setItem('pokemon-estimation:wishlist', JSON.stringify([
+      { id: 'pl3-145', lang: 'fr', name: 'Carchacrok C NIV.X', set: 'Vainqueurs Suprêmes', number: '145/147', variant: 'holo', marketPrice: 30, marketDate: '2026-10-10T00:00:00Z', target: 25 },
+      { id: 'cel25cc-CC018', lang: 'fr', name: 'Carchacrok C NIV.X', set: 'Célébrations', number: '145/147', variant: 'holo', marketPrice: 7.2, marketDate: '2026-10-18T00:00:00Z', target: 5 },
+    ]));
+    localStorage.setItem('pokemon-estimation:wishlist-check', '2000-01-01');
+  });
+  await page.reload();
+  await page.waitForFunction(() => /à ton prix/.test(document.getElementById('toast').textContent));
+  assert.match(await page.textContent('#toast'), /Carchacrok C NIV\.X est à ton prix : 20,00/);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('pokemon-estimation:wishlist')));
+  assert.deepEqual(saved.map((w) => [w.marketPrice, Boolean(w.deal)]), [[20, true], [7.2, false]]);
+  assert.equal(await page.textContent('#wishBadge'), '1');
+  // Checked once a day only.
+  await page.reload();
+  await page.waitForTimeout(300);
+  assert.equal(await page.isHidden('#toast'), true);
+}));
+
+test('souhaits : « Je l’ai » passe la carte dans la collection', () => withPage({}, async (page) => {
+  await page.evaluate(() => {
+    localStorage.setItem('pokemon-estimation:wishlist', JSON.stringify([
+      { id: 'pl3-145', lang: 'fr', name: 'Carchacrok C NIV.X', set: 'Vainqueurs Suprêmes', number: '145/147', variant: 'holo', marketPrice: 20, target: 25, deal: true },
+    ]));
+    localStorage.setItem('pokemon-estimation:wishlist-check', new Date().toLocaleDateString('sv'));
+  });
+  await page.goto(`${site.url}#souhaits`);
+  await page.reload();
+  await page.locator('#wishRows .w-got').click();
+  const r = await page.evaluate(() => ({
+    wish: JSON.parse(localStorage.getItem('pokemon-estimation:wishlist')),
+    col: JSON.parse(localStorage.getItem('pokemon-estimation:collection')),
+  }));
+  assert.equal(r.wish.length, 0);
+  assert.equal(r.col.length, 1);
+  assert.deepEqual([r.col[0].id, r.col[0].condition, r.col[0].qty, r.col[0].marketPrice, r.col[0].target], ['pl3-145', 'NM', 1, 20, undefined]);
+  assert.match(await page.textContent('#wishRows'), /Aucune carte recherchée/);
+}));
+
+test('souhaits : étoile sur les cartes manquantes d’une extension', () => withPage({}, async (page) => {
+  await page.goto(`${site.url}#extensions`);
+  await page.selectOption('#setSelect', 'pl3');
+  await page.locator('.tick-wish').click();
+  await page.waitForSelector('.tick-wish.on');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('pokemon-estimation:wishlist')));
+  assert.deepEqual(saved.map((w) => [w.id, w.marketPrice]), [['pl3-145', 20]]);
+  // Ticking the card itself is still possible, and hides the star.
+  await page.locator('label.tick input[type=checkbox]').check();
+  await page.waitForSelector('label.tick.owned');
+  assert.equal(await page.locator('.tick-wish').count(), 0);
+}));
+
+test('souhaits : données nettoyées au chargement', () => withPage({}, async (page) => {
+  const r = await page.evaluate(() => sanitizeWishlist([
+    { id: 'pl3-145', name: 'Carchacrok', target: -3, qty: 4, condition: 'PO', image: 'javascript:x', deal: 'yes' },
+    { id: 'sm3-145', name: 'Apocyne', target: 12.345 },
+    'junk',
+  ]));
+  assert.equal(r.length, 2);
+  assert.deepEqual(Object.keys(r[0]).sort(), ['id', 'image', 'lang', 'name', 'number', 'set', 'variant']);
+  assert.equal(r[0].image, '');
+  assert.equal(r[1].target, 12.35);
+}));
+
 test('collection sur téléphone : réglages repliés, un toucher les ouvre', () => withPage({}, async (page) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => {

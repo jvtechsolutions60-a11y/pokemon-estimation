@@ -50,6 +50,7 @@
     <a href="#scan" data-tab="scan"><span class="tab-ico" aria-hidden="true">📷</span><span>Scanner</span></a>
     <a href="#extensions" data-tab="extensions"><span class="tab-ico" aria-hidden="true">☑️</span><span>Extensions</span></a>
     <a href="#collection" data-tab="collection"><span class="tab-ico" aria-hidden="true">🗂️</span><span>Collection</span><span id="tabCount" class="tab-badge" hidden></span></a>
+    <a href="#souhaits" data-tab="souhaits"><span class="tab-ico" aria-hidden="true">⭐</span><span>Souhaits</span><span id="wishBadge" class="tab-badge" hidden></span></a>
     <a href="#compte" data-tab="compte"><span class="tab-ico" aria-hidden="true">🔐</span><span>Compte</span></a>
   </nav>
 
@@ -206,6 +207,37 @@
         Prix : moyenne des ventes Cardmarket sur 7 jours via <a href="https://tcgdex.dev" target="_blank" rel="noopener">TCGdex</a>, toutes langues confondues.
         « Actualiser » ne change un prix que si Cardmarket a publié de nouvelles ventes. Un prix venant de « € Cardmarket » ou saisi à la main n'est jamais remplacé.
         L'état applique une décote indicative.
+      </p>
+    </section>
+
+    <section class="view" id="view-souhaits" data-view="souhaits" hidden>
+      <div class="hero">
+        <h1>Cartes recherchées</h1>
+        <p>Ajoute les cartes que tu veux avec ☆ et fixe ton prix : on te prévient quand Cardmarket passe en dessous.</p>
+      </div>
+      <div class="summary">
+        <div class="stat stat-main">
+          <span class="stat-label">Coût actuel</span>
+          <strong id="wishTotal">0,00 €</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Cartes</span>
+          <strong id="wishCount">0</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">À ton prix</span>
+          <strong id="wishDeals">0</strong>
+        </div>
+      </div>
+      <div class="panel toolbar">
+        <div class="toolbar-actions">
+          <button id="wishRefresh" type="button">↻ Actualiser les prix</button>
+        </div>
+      </div>
+      <p id="wishInfo" class="status small"></p>
+      <div id="wishRows" class="items"></div>
+      <p class="muted small note">
+        Les prix sont vérifiés une fois par jour à l'ouverture du site. Laisse le prix cible vide pour simplement suivre la carte.
       </p>
     </section>
 
